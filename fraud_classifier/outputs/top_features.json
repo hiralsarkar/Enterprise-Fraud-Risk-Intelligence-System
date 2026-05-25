@@ -1,0 +1,62 @@
+[
+  {
+    "feature": "C5",
+    "mean_abs_shap": 0.28964361548423767
+  },
+  {
+    "feature": "C14",
+    "mean_abs_shap": 0.24776992201805115
+  },
+  {
+    "feature": "C1",
+    "mean_abs_shap": 0.2329152524471283
+  },
+  {
+    "feature": "M4",
+    "mean_abs_shap": 0.2186077982187271
+  },
+  {
+    "feature": "TransactionAmt",
+    "mean_abs_shap": 0.21089047193527222
+  },
+  {
+    "feature": "C13",
+    "mean_abs_shap": 0.1992717981338501
+  },
+  {
+    "feature": "card6",
+    "mean_abs_shap": 0.1790395975112915
+  },
+  {
+    "feature": "D3",
+    "mean_abs_shap": 0.17618152499198914
+  },
+  {
+    "feature": "card1_txn_count",
+    "mean_abs_shap": 0.16941605508327484
+  },
+  {
+    "feature": "D2",
+    "mean_abs_shap": 0.1553696244955063
+  },
+  {
+    "feature": "card1",
+    "mean_abs_shap": 0.13494737446308136
+  },
+  {
+    "feature": "D1",
+    "mean_abs_shap": 0.12895025312900543
+  },
+  {
+    "feature": "M6",
+    "mean_abs_shap": 0.11855854094028473
+  },
+  {
+    "feature": "C8",
+    "mean_abs_shap": 0.11378518491983414
+  },
+  {
+    "feature": "C2",
+    "mean_abs_shap": 0.10299278795719147
+  }
+]

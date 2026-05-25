@@ -1,0 +1,11 @@
+data/
+*.csv
+*.parquet
+models/*.pkl
+__pycache__/
+.env
+*.zip
+.DS_Store
+outputs/X_train.parquet
+outputs/X_test.parquet
+outputs/y_train.parquet

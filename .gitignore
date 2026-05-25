@@ -1,0 +1,30 @@
+# Environment & secrets
+.env
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Large data files
+fraud_classifier/data/
+*.parquet
+*.zip
+
+# Trained model binaries
+fraud_classifier/models/*.pkl
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# uv / pyproject lock (local tooling)
+uv.lock
