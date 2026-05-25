@@ -1,6 +1,6 @@
 # Enterprise Fraud Risk Intelligence System
 
-**A production-grade fraud detection pipeline built on the IEEE-CIS dataset, structured to SR 11-7 model risk management standards.**
+**A fraud detection pipeline built on the IEEE-CIS dataset, structured to SR 11-7 model risk management standards.**
 
 > Built as a portfolio project demonstrating end-to-end AI risk model development for BFSI (Banking, Financial Services & Insurance).
 
