@@ -26,7 +26,7 @@
 
 ## Validation Results
 
-Validated on a time-aware holdout (last 20% of data by TransactionDT — never random split on fraud data).
+Validated on a time-aware holdout (last 20% of data by TransactionDT - never random split on fraud data).
 
 | Metric           | Champion: Decision Tree | Challenger: XGBoost | SR 11-7 Benchmark |
 |------------------|------------------------|---------------------|-------------------|
@@ -196,4 +196,4 @@ This project follows SR 11-7 (Federal Reserve Model Risk Management Guidance) pr
 
 ---
 
-*Built May 2026 — IEEE-CIS Fraud Detection (Kaggle)*
+*Built May 2026 - IEEE-CIS Fraud Detection (Kaggle)*
