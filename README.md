@@ -1,4 +1,4 @@
-# BFSI Fraud Risk Classifier
+# Enterprise Fraud Risk Intelligence System
 
 **A production-grade fraud detection pipeline built on the IEEE-CIS dataset, structured to SR 11-7 model risk management standards.**
 
@@ -121,7 +121,7 @@ This replaces manual write-up time for each flagged case (~15 min/case → autom
 ## Repository Structure
 
 ```
-Fraud-Risk-Classifier/
+Enterprise-Fraud-Risk-Intelligence-System/
 ├── fraud_classifier/
 │   ├── notebooks/
 │   │   ├── 01_eda_feature_engineering.py      # EDA, null handling, feature engineering
@@ -143,8 +143,8 @@ Fraud-Risk-Classifier/
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/hiralsarkar/Fraud-Risk-Classifier.git
-cd Fraud-Risk-Classifier/fraud_classifier
+git clone https://github.com/hiralsarkar/Enterprise-Fraud-Risk-Intelligence-System.git
+cd Enterprise-Fraud-Risk-Intelligence-System/fraud_classifier
 pip install -r requirements.txt
 
 # 2. Download data from Kaggle
