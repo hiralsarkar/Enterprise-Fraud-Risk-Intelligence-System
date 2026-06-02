@@ -1,56 +1,79 @@
-# BFSI Fraud Risk Classifier
+<div align="center">
 
-**A production-grade fraud detection pipeline built on the IEEE-CIS dataset, structured to SR 11-7 model risk management standards.**
+# Enterprise Fraud Risk Intelligence System
 
-> Built as a portfolio project demonstrating end-to-end AI risk model development for BFSI (Banking, Financial Services & Insurance).
+### End-to-end fraud detection pipeline structured to SR 11-7 model risk management standards
 
----
+[![Python](https://img.shields.io/badge/Python-3.11-blue?style=flat&logo=python)](https://python.org)
+[![XGBoost](https://img.shields.io/badge/XGBoost-2.0-orange?style=flat)](https://xgboost.ai)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
+[![Dataset](https://img.shields.io/badge/Dataset-IEEE--CIS%20Fraud-purple?style=flat&logo=kaggle)](https://www.kaggle.com/competitions/ieee-fraud-detection)
 
-## Pipeline Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                   FRAUD RISK PIPELINE                       │
-├──────────┬──────────┬──────────┬──────────┬────────────────┤
-│ Step 1   │ Step 2   │ Step 3   │ Step 4   │ Step 5         │
-│ Ingest & │ Feature  │ Classify │ Alert &  │ Validate &     │
-│ Inventory│ Engineer │ (Model)  │ Triage   │ Monitor        │
-├──────────┼──────────┼──────────┼──────────┼────────────────┤
-│ 590,540  │ 63 risk  │ Decision │ LLM SAR  │ PSI drift      │
-│ txns     │ features │ Tree +   │ narrative│ monitor        │
-│ merged   │ engineered│ XGBoost │ via API  │ KS / Gini      │
-└──────────┴──────────┴──────────┴──────────┴────────────────┘
-```
+</div>
 
 ---
 
-## Validation Results
+## The Problem
 
-Validated on a time-aware holdout (last 20% of data by TransactionDT — never random split on fraud data).
+A financial institution processes hundreds of thousands of transactions daily. 3.5% are fraudulent. A simple rule flags everything over $500 — it misses 60% of fraud and blocks legitimate customers. A black-box model scores better but can't explain its decisions to a regulator, a compliance officer, or the customer it just declined.
 
-| Metric         | Champion: Decision Tree | Challenger: XGBoost | SR 11-7 Benchmark |
-|----------------|------------------------|---------------------|-------------------|
-| **KS Statistic** | 0.5067              | **0.6670**          | > 0.40 ✓          |
-| **Gini**         | 0.6461              | **0.8217**          | > 0.60 ✓          |
-| AUC-ROC          | 0.8231              | **0.9108**          | —                 |
-| AUC-PR           | 0.3601              | **0.4970**          | —                 |
+The solution requires three things working together: **detection** that finds the right transactions, **explainability** that traces why each one was flagged, and **governance** that proves the system is working — and alerts when it isn't.
 
-> **Why KS and Gini?** These are the standard metrics in bank model validation reports (SR 11-7 / SS1-23). Accuracy is not used — the 3.5% fraud rate makes it meaningless.
+This project builds all three.
 
-### PSI Drift Monitoring
+---
 
-| Comparison        | PSI Value | Assessment  |
-|-------------------|-----------|-------------|
-| Train → Validation | 0.00105  | ✅ Stable   |
-| Train → Test data  | 0.00046  | ✅ Stable   |
+## Pipeline
 
-PSI thresholds: `< 0.10` Stable | `0.10–0.25` Minor drift | `> 0.25` Model review required
+```
+Raw Data                    Detection               Explainability      Governance
+────────────────────────────────────────────────────────────────────────────────
+
+590,540 transactions   →   Champion vs         →   SHAP attribution  →   PSI drift
++ identity signals         Challenger model        per transaction       monitoring
+
+IEEE-CIS dataset           Decision Tree           Top risk drivers      Population
+(Vesta Corporation)        vs XGBoost              in plain English      stability
+                                                                          tracking
+                                                        ↓
+                                               LLM Triage Agent
+                                               SAR-style narrative
+                                               for compliance analyst
+```
+
+---
+
+## Results
+
+> Validated on an **out-of-time holdout** (last 20% by TransactionDT).
+> Random splits are not used — they cause data leakage on time-series transaction data.
+
+| Metric | Champion: Decision Tree | Challenger: XGBoost | SR 11-7 Threshold |
+|--------|------------------------|---------------------|-------------------|
+| **KS Statistic** | 0.5067 | **0.6670** | > 0.40 ✓ |
+| **Gini Coefficient** | 0.6461 | **0.8217** | > 0.60 ✓ |
+| AUC-ROC | 0.8231 | **0.9108** | — |
+| AUC-PR | 0.3601 | **0.4970** | — |
+
+> **Why KS and Gini — not accuracy?**
+> With a 3.5% fraud rate, a model predicting "legitimate" every time achieves 96.5% accuracy.
+> KS and Gini measure *discrimination* — the separation between fraud and legitimate score distributions.
+> These are the metrics that appear in bank model validation reports.
+
+### Population Stability
+
+| Comparison | PSI | Status |
+|------------|-----|--------|
+| Train → Validation | 0.00105 | ✅ Stable |
+| Train → Test | 0.00046 | ✅ Stable |
+
+PSI < 0.10 = Stable · PSI 0.10–0.25 = Monitor · PSI > 0.25 = Model review required
 
 ---
 
 ## Dataset
 
-**Source:** [IEEE-CIS Fraud Detection](https://www.kaggle.com/competitions/ieee-fraud-detection/data) — Vesta Corporation
+**Source:** [IEEE-CIS Fraud Detection](https://www.kaggle.com/competitions/ieee-fraud-detection) — Vesta Corporation
 
 | Stat | Value |
 |------|-------|
@@ -63,77 +86,124 @@ PSI thresholds: `< 0.10` Stable | `0.10–0.25` Minor drift | `> 0.25` Model rev
 
 ---
 
-## Feature Engineering
+## Five Components
 
-10 domain-relevant features engineered:
+### 1 · Data Pipeline & EDA
+590,540 transactions merged with 144,233 identity records. Null governance: columns with >90% missing values dropped. Class imbalance documented: 20,663 fraud cases (3.5%) against 569,877 legitimate transactions.
 
-| Feature | Description | Fraud signal |
-|---------|-------------|--------------|
-| `amt_log` | Log-transform of transaction amount | Right-skew correction |
-| `amt_zscore` | Amount z-score per card (unusual spend) | High zscore = risk |
-| `email_mismatch` | Purchaser vs recipient email domain differs | 1 = risk |
-| `P_email_risky` | Purchaser uses free/anonymous email provider | 1 = risk |
+### 2 · Feature Engineering
+10 behavioural risk features engineered from domain logic — not statistical selection alone:
+
+| Feature | What it captures | Fraud signal |
+|---------|-----------------|--------------|
+| `amt_zscore` | How unusual is this amount for *this specific card's* history | High z-score = risk |
+| `card1_txn_count` | Transaction velocity — how many charges in this window | High count = risk |
+| `email_mismatch` | Purchaser and recipient email domains differ | 1 = risk |
+| `P_email_risky` | Purchaser using free / anonymous email provider | 1 = risk |
 | `is_night` | Transaction between 00:00–06:00 UTC | 1 = elevated risk |
-| `card1_txn_count` | Transaction velocity for this card | High = risk |
-| `addr_mismatch` | Billing vs shipping address mismatch | 1 = risk |
-| `is_large_txn` | Transaction > $500 USD | 1 = risk |
-| `C_sum` | Sum of C-columns (previous address/device counts) | Low = risk |
-| `is_mobile` | Device type is mobile | Context feature |
+| `addr_mismatch` | Billing and shipping address inconsistency | 1 = risk |
+| `is_large_txn` | Transaction exceeds $500 USD | 1 = risk |
+| `amt_log` | Log-transform correcting right-skewed amount distribution | Normalisation |
+| `C_sum` | Aggregate of historical address and device count signals | Low = risk |
+| `is_mobile` | Device type context | Context feature |
 
-**Top 5 features by SHAP importance:** `C5`, `C14`, `C1`, `M4`, `TransactionAmt`
+**Top features by SHAP importance:** `C5` · `C14` · `C1` · `M4` · `TransactionAmt`
 
----
+### 3 · Champion-Challenger Modelling
 
-## Models
+**Champion — Decision Tree**
+`max_depth=8` · `min_samples_leaf=50` · `class_weight='balanced'`
+Fully interpretable. Every decision path traceable. Regulatory baseline.
 
-### Champion: Decision Tree (interpretable baseline)
-- `max_depth=8`, `min_samples_leaf=50`, `class_weight='balanced'`
-- Fully interpretable — every decision path is explainable to a regulator
-- Baseline against which XGBoost challenger is compared
+**Challenger — XGBoost**
+300 estimators · `learning_rate=0.05` · `scale_pos_weight=27.6` (imbalance ratio)
+Early stopping on AUC-PR — the correct metric for imbalanced fraud data.
+`tree_method='hist'` for memory efficiency at 590k rows.
 
-### Challenger: XGBoost
-- 300 estimators, `learning_rate=0.05`, `scale_pos_weight=27.6` (handles class imbalance)
-- `tree_method='hist'` for memory efficiency on 590k rows
-- Early stopping on AUC-PR (the right metric for imbalanced fraud data)
+The champion-challenger framework is how banks compare models before production deployment. The challenger doesn't replace the champion until it demonstrably outperforms on validated metrics.
 
----
+### 4 · SHAP Explainability
 
-## LLM Triage Agent (Notebook 3)
+Every prediction has a traceable reason. SHAP (SHapley Additive exPlanations) decomposes the model's output into individual feature contributions — showing not just *what* was flagged but *why*.
 
-Flagged transactions are routed to a Claude-powered triage agent that:
-1. Computes SHAP values for the specific transaction
-2. Identifies the top risk-increasing and risk-reducing factors
-3. Generates a SAR-style narrative for compliance analysts
+This satisfies:
+- SR 11-7 conceptual soundness requirement
+- GDPR Article 22 right to explanation
+- EU AI Act transparency requirements
+- Internal audit and compliance review requirements
 
-**Example output:**
+### 5 · PSI Drift Monitoring + LLM Triage Agent
+
+**PSI Monitor**
+Compares score distributions between training population and live population across 10 score bins. Detects model degradation before it becomes a business problem. Standard MRM requirement for models in production.
+
+**LLM Triage Agent**
+Flagged transactions are passed to Claude with their SHAP attribution. The agent generates a SAR-style investigation narrative for the compliance analyst:
+
 ```
 Transaction flagged at 94.3% fraud probability — CRITICAL risk.
-Primary drivers: elevated C5 count (14x above card average) and 
-TransactionAmt of $847 which is 3.2 standard deviations above this 
-card's historical mean. Email domain mismatch detected.
-RECOMMENDATION: Immediate block. Notify compliance officer.
+
+Primary drivers: elevated C5 count (14x above card average) and
+TransactionAmt of $847 which is 3.2 standard deviations above this
+card's historical mean. Email domain mismatch detected between
+purchaser and recipient — a secondary velocity signal further
+elevates the risk profile.
+
+RECOMMENDATION: Immediate block. Escalate to compliance officer.
+Case sent for further investigation — HIGH PRIORITY.
 ```
 
-This replaces manual write-up time for each flagged case (~15 min/case → automated).
+What previously required 15 minutes of manual analyst write-up per flagged case is generated automatically, with full SHAP-backed reasoning.
+
+---
+
+## Regulatory Alignment
+
+| SR 11-7 Requirement | Implementation |
+|--------------------|----------------|
+| Model development documentation | Feature rationale, assumption documentation, data lineage in each notebook |
+| Conceptual soundness | SHAP explainability, decision tree interpretability |
+| Out-of-time validation | TransactionDT-ordered split — no random sampling |
+| Ongoing monitoring | PSI drift monitoring across 10 score bins |
+| Champion-challenger | Structured comparison: Decision Tree baseline vs XGBoost challenger |
+| Sensitivity analysis | Class imbalance handling, threshold analysis |
+
+---
+
+## Key BFSI Concepts Demonstrated
+
+| Concept | Where used |
+|---------|-----------|
+| KS Statistic | Model validation (Notebook 2) |
+| Gini Coefficient | Model validation (Notebook 2) |
+| PSI Drift Monitoring | Production monitoring (Notebook 3) |
+| Champion-Challenger | Model comparison (Notebook 2) |
+| SHAP / XAI | Explainability (Notebooks 2 & 3) |
+| SAR Narrative | LLM triage layer (Notebook 3) |
+| Class Imbalance Handling | `scale_pos_weight`, `class_weight='balanced'` |
+| Time-Aware Validation | Out-of-time split on TransactionDT |
 
 ---
 
 ## Repository Structure
 
 ```
-fraud_classifier/
 ├── notebooks/
-│   ├── 01_eda_feature_engineering.py      # EDA, null handling, feature engineering
-│   ├── 02_model_training_validation.py    # Champion-challenger, KS/Gini, SHAP
-│   └── 03_risk_pipeline_llm_triage.py     # PSI monitor + LLM triage agent
+│   ├── 01_eda_feature_engineering.py      # Data pipeline, null governance, feature engineering
+│   ├── 02_model_training_validation.py    # Champion-challenger, KS/Gini/SHAP, validation plots
+│   └── 03_risk_pipeline_llm_triage.py     # PSI monitor + LLM SAR triage agent
+│
 ├── outputs/
-│   ├── metrics.json                       # Validation metrics
+│   ├── metrics.json                       # KS, Gini, AUC-ROC, AUC-PR
 │   ├── psi_results.json                   # Drift monitoring results
-│   ├── shap_importance.csv                # SHAP feature importance
-│   └── submission.csv                     # Kaggle submission
+│   ├── shap_importance.csv                # Feature-level SHAP values
+│   ├── triage_demo.csv                    # LLM triage narratives (5 highest-risk cases)
+│   └── submission.csv                     # Kaggle leaderboard submission
+│
 ├── models/
 │   ├── champion_decision_tree.pkl
 │   └── challenger_xgboost.pkl
+│
 ├── requirements.txt
 └── README.md
 ```
@@ -144,8 +214,8 @@ fraud_classifier/
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/YOUR_USERNAME/fraud-risk-classifier
-cd fraud-risk-classifier
+git clone https://github.com/hiralsarkar/Fraud-Risk-Classifier
+cd Fraud-Risk-Classifier
 pip install -r requirements.txt
 
 # 2. Download data from Kaggle
@@ -156,44 +226,30 @@ pip install -r requirements.txt
 python notebooks/01_eda_feature_engineering.py
 python notebooks/02_model_training_validation.py
 
-# 4. For LLM triage layer, set your API key
-export ANTHROPIC_API_KEY="your-key-here"
+# 4. LLM triage layer — requires Anthropic API key
+# Get yours at console.anthropic.com
+# Windows:   setx ANTHROPIC_API_KEY "sk-ant-..."
+# Mac/Linux: export ANTHROPIC_API_KEY="sk-ant-..."
 python notebooks/03_risk_pipeline_llm_triage.py
 ```
 
 ---
 
-## Regulatory Alignment
+## Stack
 
-This project follows SR 11-7 (Federal Reserve Model Risk Management Guidance) principles:
-
-- **Model development**: documented assumptions, training/validation split rationale
-- **Model validation**: KS, Gini, AUC-PR on out-of-time holdout
-- **Ongoing monitoring**: PSI drift detection between training and live populations
-- **Explainability**: SHAP values for every prediction (XAI requirement under GDPR Art. 22 / EU AI Act)
-- **Champion-challenger**: structured comparison before deployment
-
----
-
-## Key BFSI Concepts Demonstrated
-
-| Concept | Where used |
-|---------|-----------|
-| KS Statistic | Model validation (Notebook 2) |
-| Gini coefficient | Model validation (Notebook 2) |
-| PSI drift monitoring | Production monitoring (Notebook 3) |
-| Champion-challenger | Model comparison (Notebook 2) |
-| SHAP / XAI | Explainability (Notebooks 2 & 3) |
-| SAR narrative | LLM triage layer (Notebook 3) |
-| Class imbalance handling | `scale_pos_weight`, `class_weight='balanced'` |
-| Time-aware validation | Out-of-time split on TransactionDT |
+`Python 3.11` · `XGBoost` · `scikit-learn` · `SHAP` · `pandas` · `numpy` · `matplotlib` · `Anthropic API` · `joblib` · `pyarrow`
 
 ---
 
 ## Skills Demonstrated
 
-`Python` `XGBoost` `scikit-learn` `SHAP` `pandas` `Anthropic API` `Model Risk Management` `SR 11-7` `AML` `Fraud Detection` `Feature Engineering` `Model Validation` `PSI Monitoring`
+`Python` `XGBoost` `scikit-learn` `SHAP` `pandas` `Anthropic API` `Model Risk Management` `SR 11-7` `AML` `Fraud Detection` `Feature Engineering` `Model Validation` `PSI Monitoring` `Champion-Challenger` `GDPR XAI`
 
 ---
 
-*Built May 2026 — IEEE-CIS Fraud Detection (Kaggle)*
+<div align="center">
+
+*Built June 2026 · Hiral Sarkar*
+*[LinkedIn](https://linkedin.com/in/hiralsarkar) · [GitHub](https://github.com/hiralsarkar)*
+
+</div>
