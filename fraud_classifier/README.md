@@ -189,9 +189,9 @@ What previously required 15 minutes of manual analyst write-up per flagged case 
 
 ```
 ├── notebooks/
-│   ├── 01_eda_feature_engineering.py      # Data pipeline, null governance, feature engineering
-│   ├── 02_model_training_validation.py    # Champion-challenger, KS/Gini/SHAP, validation plots
-│   └── 03_risk_pipeline_llm_triage.py     # PSI monitor + LLM SAR triage agent
+│   ├── 01_eda_feature_engineering.ipynb   # Data pipeline, null governance, feature engineering
+│   ├── 02_model_training_validation.ipynb # Champion-challenger, KS/Gini/SHAP, validation plots
+│   └── 03_risk_pipeline_llm_triage.ipynb  # PSI monitor + LLM SAR triage agent
 │
 ├── outputs/
 │   ├── metrics.json                       # KS, Gini, AUC-ROC, AUC-PR
@@ -223,14 +223,15 @@ pip install -r requirements.txt
 # Place CSVs in ./data/ieee-fraud-detection/
 
 # 3. Run notebooks in order
-python notebooks/01_eda_feature_engineering.py
-python notebooks/02_model_training_validation.py
+jupyter notebook notebooks/01_eda_feature_engineering.ipynb
+# Run 02 after 01 completes
+jupyter notebook notebooks/02_model_training_validation.ipynb
 
-# 4. LLM triage layer — requires Anthropic API key
-# Get yours at console.anthropic.com
-# Windows:   setx ANTHROPIC_API_KEY "sk-ant-..."
-# Mac/Linux: export ANTHROPIC_API_KEY="sk-ant-..."
-python notebooks/03_risk_pipeline_llm_triage.py
+# 4. LLM triage layer — requires OpenRouter API key
+# Get a free key at openrouter.ai/keys
+# Windows:   setx OPENROUTER_API_KEY "sk-or-..."
+# Mac/Linux: export OPENROUTER_API_KEY="sk-or-..."
+jupyter notebook notebooks/03_risk_pipeline_llm_triage.ipynb
 ```
 
 ---
