@@ -37,7 +37,8 @@ except ImportError:
 OUT_DIR   = os.path.join(_HERE, '..', 'outputs') + os.sep
 MODEL_DIR = os.path.join(_HERE, '..', 'models') + os.sep
 TRIAGE_MODEL = os.environ.get('TRIAGE_MODEL', 'claude-haiku-5-5')
-N_DEMO_CASES = 5
+N_DEMO_CASES = 5          # alerts that get an LLM narrative (when a key is set)
+N_CONSOLE_CASES = 25      # top out-of-time alerts exported for the analyst console
 
 # %%
 X_all  = pd.read_parquet(OUT_DIR + 'X_train.parquet')
@@ -200,7 +201,7 @@ def llm_narrative(prompt):
         print(f"LLM call failed ({type(e).__name__}); using template")
         return None
 
-def triage(row, txn_id):
+def triage(row, txn_id, use_llm=True):
     p, risk, protect = explain_transaction(row)
     tier = risk_tier(p)
     payload = {'fraud_probability': round(p, 4), 'risk_tier': tier, 'recommended_action': ACTIONS[tier],
@@ -211,7 +212,7 @@ def triage(row, txn_id):
               "Write 3-4 plain sentences: the probability and tier, the top 2-3 drivers, and the recommended action as given.\n\n"
               + json.dumps(payload, indent=2))
     allowed = [p] + [float(r[k]) for r in risk + protect for k in ('value', 'shap') if isinstance(r[k], (int, float))]
-    text, source = llm_narrative(prompt), f'LLM:{TRIAGE_MODEL}'
+    text, source = (llm_narrative(prompt) if use_llm else None), f'LLM:{TRIAGE_MODEL}'
     if text and not numbers_grounded(text, allowed):
         source, text = 'template (LLM output rejected: ungrounded number)', None
     if not text:
@@ -223,21 +224,28 @@ def triage(row, txn_id):
                             'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest(), 'prompt': prompt,
                             'narrative': text}) + '\n')
     return {'transaction_id': int(txn_id), 'fraud_probability': round(p, 4), 'risk_tier': tier,
-            'narrative': text, 'source': source, 'top_risk_factors': [r['feature'] for r in risk]}
+            'narrative': text, 'source': source, 'top_risk_factors': [r['feature'] for r in risk],
+            'drivers': [[r['feature'], str(r['value']), r['shap']] for r in risk[:4] + protect[:3]]}
 
 # %% [markdown]
 # ## Demo — the highest-probability OOT alerts
 
 # %%
-oot_ids = meta.loc[(meta['period'] == 'oot').values, 'TransactionID'].values
-order = np.argsort(-oot_scores)[:N_DEMO_CASES]
+oot_meta = meta.loc[(meta['period'] == 'oot').values].reset_index(drop=True)
+order = np.argsort(-oot_scores)[:max(N_DEMO_CASES, N_CONSOLE_CASES)]
 results = []
 for rank, i in enumerate(order, 1):
-    r = triage(X_oot.iloc[i], oot_ids[i])
+    r = triage(X_oot.iloc[i], oot_meta.loc[i, 'TransactionID'], use_llm=rank <= N_DEMO_CASES)
     r['actual'] = 'FRAUD' if y_oot.iloc[i] == 1 else 'LEGIT'
+    r['amount'] = round(float(X_oot.iloc[i]['TransactionAmt']), 2)
+    for col in ('ProductCD', 'card4', 'card6', 'P_emaildomain', 'DeviceType'):
+        r[col] = None if col not in oot_meta or pd.isna(oot_meta.loc[i, col]) else str(oot_meta.loc[i, col])
     results.append(r)
-    print(f"\n#{rank} {r['transaction_id']} | {r['fraud_probability']:.1%} {r['risk_tier']} | actual {r['actual']} | {r['source']}\n  {r['narrative']}")
-pd.DataFrame(results).to_csv(OUT_DIR + 'triage_demo.csv', index=False)
+    if rank <= N_DEMO_CASES:
+        print(f"\n#{rank} {r['transaction_id']} | {r['fraud_probability']:.1%} {r['risk_tier']} | actual {r['actual']} | {r['source']}\n  {r['narrative']}")
+pd.DataFrame(results[:N_DEMO_CASES]).drop(columns='drivers').to_csv(OUT_DIR + 'triage_demo.csv', index=False)
+with open(OUT_DIR + 'triage_cases.json', 'w') as f:
+    json.dump(results[:N_CONSOLE_CASES], f, indent=1)
 
 # %% [markdown]
 # ## Results summary → `outputs/RESULTS.md`

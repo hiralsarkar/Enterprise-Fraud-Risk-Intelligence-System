@@ -189,6 +189,11 @@ NEW_FEATURES = ['amt_log', 'card1_txn_count_7d', 'card1_prior_amt_mean', 'amt_zs
                 'is_large_txn', 'C_sum', 'is_mobile']
 print(train.loc[fit_mask].groupby('isFraud')[NEW_FEATURES].mean().T.rename(columns={0: 'legit', 1: 'fraud'}))
 
+# %%
+# Keep human-readable values for the analyst console before encoding
+DISPLAY_COLS = [c for c in ('ProductCD', 'card4', 'card6', 'P_emaildomain', 'DeviceType') if c in train.columns]
+train_display = train[DISPLAY_COLS].copy()
+
 # %% [markdown]
 # ## Encode categoricals
 # Frequency encoding with counts learned on the **fit period only**; unseen categories get 0.
@@ -218,7 +223,8 @@ X_test  = test[FEATURES].fillna(-999)
 X_train.to_parquet(OUT_DIR + 'X_train.parquet', index=False)
 y_train.to_frame().to_parquet(OUT_DIR + 'y_train.parquet', index=False)
 X_test.to_parquet(OUT_DIR + 'X_test.parquet', index=False)
-train[['TransactionID', 'TransactionDT', 'period']].to_parquet(OUT_DIR + 'train_meta.parquet', index=False)
+pd.concat([train[['TransactionID', 'TransactionDT', 'period']], train_display], axis=1) \
+    .to_parquet(OUT_DIR + 'train_meta.parquet', index=False)
 test[['TransactionID', 'TransactionDT']].to_parquet(OUT_DIR + 'test_meta.parquet', index=False)
 
 with open(OUT_DIR + 'features.json', 'w') as f:

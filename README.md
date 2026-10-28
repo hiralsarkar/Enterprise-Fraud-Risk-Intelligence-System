@@ -2,117 +2,134 @@
 
 # Enterprise Fraud Risk Intelligence System
 
-### End-to-end fraud detection pipeline, structured along SR 11-7 model risk management principles
+**Detect → Explain → Govern.** An end-to-end card-fraud risk system built the way a bank's model risk team would review it: leakage-free validation, calibrated probabilities, an operating point tied to analyst capacity, explanations analysts can act on, and drift monitoring.
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat&logo=python)](https://python.org)
-[![XGBoost](https://img.shields.io/badge/XGBoost-2.x-orange?style=flat)](https://xgboost.ai)
-[![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
-[![Dataset](https://img.shields.io/badge/Dataset-IEEE--CIS%20Fraud-purple?style=flat&logo=kaggle)](https://www.kaggle.com/competitions/ieee-fraud-detection)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![XGBoost](https://img.shields.io/badge/XGBoost-2.x-EB6E00?style=flat-square)](https://xgboost.ai)
+[![SHAP](https://img.shields.io/badge/Explainability-SHAP-6E40C9?style=flat-square)](https://github.com/shap/shap)
+[![Model risk](https://img.shields.io/badge/Model%20risk-SR%2011--7%20aligned-0F766E?style=flat-square)](#model-risk-management-mapping)
+[![Dataset](https://img.shields.io/badge/Data-IEEE--CIS%20Fraud-20BEFF?style=flat-square&logo=kaggle&logoColor=white)](https://www.kaggle.com/competitions/ieee-fraud-detection)
+[![License](https://img.shields.io/badge/License-MIT-22C55E?style=flat-square)](LICENSE)
+
+[**Live console**](#analyst-console) · [How it works](#how-it-works) · [Validation design](#validation-design) · [Results](#results) · [Quickstart](#quickstart)
+
+<img src="docs/images/console-case.png" alt="Analyst console case view: SHAP drivers, triage narrative and decision buttons" width="880">
 
 </div>
 
-> Portfolio project demonstrating AI risk model development for BFSI (banking, financial services and insurance).
+---
 
-## The problem
+## Why this project
 
-A financial institution processes hundreds of thousands of transactions a day, and about 3.5% are fraudulent. A simple rule ("flag everything over $500") misses most fraud and blocks good customers. A black-box model scores better but can't explain its decisions to a regulator, a compliance officer or the customer it declined.
+About 3.5% of card-not-present transactions in the IEEE-CIS data are fraud. Catching them is only part of the job. A deployable fraud model also has to:
 
-The answer needs three things working together: **detection** that finds the right transactions, **explainability** that shows why each one was flagged, and **governance** that proves the system works and raises the alarm when it stops working. This project builds all three.
+| Requirement | What this repo does |
+|---|---|
+| **Be measured honestly** | Three time-ordered periods; features use only the past; the out-of-time period is touched once, for the report |
+| **Produce numbers people can act on** | Isotonic calibration, so a 0.80 means roughly an 80% fraud rate, not an inflated score |
+| **Fit the operation** | The alert threshold is the lowest-cost one that the review team can actually work each day |
+| **Explain every alert** | Per-transaction SHAP drivers in plain language, plus a narrative that is rejected if it states any number not in its input |
+| **Stay trustworthy over time** | PSI on the score and the top 20 features, with review triggers |
+| **Leave an audit trail** | Every narrative is logged with its prompt hash, source and model version |
 
-## Pipeline
+## How it works
 
+```mermaid
+flowchart LR
+    A[(IEEE-CIS<br/>590k txns +<br/>identity)] --> B[1 · Periods and<br/>point-in-time<br/>features]
+    B --> C[2 · Champion: decision tree<br/>Challenger: XGBoost]
+    C --> D[Isotonic<br/>calibration]
+    D --> E[Threshold from<br/>capacity and cost]
+    E --> F[3 · Alerts]
+    F --> G[SHAP drivers]
+    G --> H[Narrative<br/>LLM or template]
+    H --> I{Grounding<br/>check}
+    I -->|pass| J[Analyst console]
+    I -->|fail| K[Template] --> J
+    D --> L[PSI monitor<br/>score + features]
+    L --> J
+    H --> M[(Audit log)]
 ```
- Notebook 1                 Notebook 2                          Notebook 3
- ───────────────────────    ────────────────────────────────    ─────────────────────────────
- Merge txn + identity   →   Champion (decision tree)        →   PSI drift: score + top features
- Time-ordered periods       Challenger (XGBoost)                Risk tier from calibrated prob.
-   fit 70 / valid 15 /      Isotonic calibration                SHAP drivers per alert
-   out-of-time 15           Threshold from capacity & cost      Triage narrative (LLM or template)
- Point-in-time features     KS / Gini / AUC-PR on OOT           Grounding check + audit log
-```
+
+| Stage | Notebook | Output |
+|---|---|---|
+| Ingest, periods, features | [`01_eda_feature_engineering.py`](fraud_classifier/notebooks/01_eda_feature_engineering.py) | Feature matrices, period labels, EDA charts |
+| Train, calibrate, choose threshold, explain | [`02_model_training_validation.py`](fraud_classifier/notebooks/02_model_training_validation.py) | Models, calibrators, `metrics.json`, `operating_point.json`, SHAP charts |
+| Monitor, triage, report | [`03_risk_pipeline_llm_triage.py`](fraud_classifier/notebooks/03_risk_pipeline_llm_triage.py) | `psi_results.json`, `triage_cases.json`, `triage_log.jsonl`, `RESULTS.md` |
+| Publish to the console | [`export_console_data.py`](fraud_classifier/scripts/export_console_data.py) | `console/data/console.json` |
 
 ## Validation design
 
-| Period | Share | Used for |
-|---|---|---|
-| **fit** | first 70% by `TransactionDT` | fitting both models; fitting encodings and the null-column filter |
-| **valid** | next 15% | XGBoost early stopping, probability calibration, threshold choice, PSI reference |
-| **out-of-time (OOT)** | last 15% | reported metrics only, touched once |
+```
+TransactionDT ─────────────────────────────────────────────────────────────▶
+│◀──────────────── fit 70% ────────────────▶│◀─ valid 15% ─▶│◀─ OOT 15% ─▶│
+  models, encodings, null filter              early stopping   reported
+                                              calibration      metrics only
+                                              threshold
+                                              PSI reference
+```
 
-Rules the code enforces:
+**Decisions and why**
 
-- **No look-ahead in features.** Card history features (7-day velocity, prior mean amount, amount z-score, time since previous transaction) use only earlier transactions on the card. Frequency encodings are learned on the fit period.
-- **No reuse of the test period.** Early stopping, calibration and threshold choice all use *valid*; OOT is only scored.
-- **Probabilities, not scores.** Class weighting inflates raw scores; an isotonic map fitted on *valid* turns them into calibrated probabilities. KS, Gini and AUC are unchanged by this (it is monotonic); the Brier score and the meaning of "94%" are not.
-- **An operating point.** The alert threshold is the lowest-cost one (missed fraud dollars + review cost) that keeps alert volume within `ALERT_CAPACITY_PER_DAY`. Precision, recall, alerts per day and % of fraud dollars caught are reported at that threshold.
-- `TransactionDT` itself is not a model feature: it is a clock, and the model would learn trends that don't carry forward.
+| Decision | Why |
+|---|---|
+| Card history features (7-day velocity, prior mean amount, amount z-score, time since last transaction) use only **earlier** rows | Aggregating over the whole dataset lets early transactions see their own future: classic leakage that inflates every metric |
+| Encodings and the >90%-null filter are fitted on **fit** only | The same leakage, through the back door |
+| `TransactionDT` is **not** a feature | It is a clock; the model would learn trends that do not carry forward |
+| Early stopping on **valid**, never on OOT | Choosing the stopping point on the test period makes the test period part of training |
+| A 7-day velocity window, not an all-time count | All-time counts grow with time and drift by construction |
+| Isotonic calibration on **valid** | Class weighting inflates scores; monotonic calibration fixes their meaning without changing ranking metrics |
+| Threshold = lowest expected cost within `ALERT_CAPACITY_PER_DAY` | A model is only as useful as the alerts a team can work |
+| PSI with reference-decile bins and a missing-value bin | Fixed-width bins on a skewed score hide drift in the bins that matter |
 
 ## Results
 
-**Current numbers are generated by the pipeline into `fraud_classifier/outputs/RESULTS.md`** (created on the first run of notebook 3), and `metrics.json` / `operating_point.json` / `psi_results.json` hold the details. Copy from there rather than editing numbers by hand.
+The pipeline writes its own report to `fraud_classifier/outputs/RESULTS.md` (KS, Gini, AUC-ROC, AUC-PR and Brier for both models on the out-of-time period, the operating point, and PSI). Numbers in this README should be copied from there, not typed by hand.
 
-> **v0.1 results (superseded).** The first version reported XGBoost KS 0.667, Gini 0.822, AUC-ROC 0.911, AUC-PR ≈ 0.50 on a 20% holdout. That holdout was also used for early stopping and the card features were computed across the split, so those numbers were optimistic. Expect v0.2 numbers to be somewhat lower and more honest.
+> **v0.1 → v0.2.** The first version reported XGBoost KS 0.667 / Gini 0.822 / AUC-ROC 0.911 / AUC-PR ≈ 0.50 on a 20% holdout. That holdout was also used for early stopping and the card features were computed across the split, so those figures were optimistic. v0.2 fixes both; expect somewhat lower, defensible numbers. *The v0.2 table goes here after the first full run.*
 
-KS > 0.40 and Gini > 0.60 are common industry rules of thumb for a usable model. SR 11-7 itself sets no numeric thresholds.
+**Reading the metrics:** with a 3.5% base rate, a model that predicts "legitimate" every time is 96.5% accurate, so accuracy is not reported. KS and Gini measure separation between fraud and legitimate scores; AUC-PR is the most informative single number at this base rate; Brier measures calibration. KS > 0.40 and Gini > 0.60 are industry rules of thumb, not SR 11-7 requirements.
 
-## Dataset
+## Analyst console
 
-[IEEE-CIS Fraud Detection](https://www.kaggle.com/competitions/ieee-fraud-detection/data) (Vesta Corporation): 590,540 labelled card-not-present transactions, 20,663 fraud (3.50%), plus 144,233 identity records. Many columns (C1–C14, D1–D15, M1–M9, V1–V339) are masked by Vesta; the triage layer says so instead of guessing what they mean. About 430 columns remain as features after dropping those that are more than 90% empty.
+A static web console in [`console/`](console/) (no build step, Vercel-ready):
 
-## Engineered features
-
-| Feature | Definition |
+| Alert queue | Model health |
 |---|---|
-| `amt_log` | log(1 + amount) |
-| `card1_txn_count_7d` | transactions on this card in the previous 7 days |
-| `card1_prior_amt_mean` | mean amount of earlier transactions on this card |
-| `amt_zscore` | amount vs. this card's earlier amounts, in standard deviations |
-| `secs_since_prev_card_txn` | seconds since the previous transaction on this card |
-| `email_mismatch` | purchaser and recipient email domains both present and different |
-| `P_email_anon` | purchaser email missing or `anonymous.com` |
-| `dt_hour` | hour of day relative to the dataset's undisclosed reference time |
-| `is_large_txn` | amount > $500 |
-| `C_sum` | sum of the masked C count columns |
-| `is_mobile` | device type is mobile |
+| <img src="docs/images/console-queue.png" alt="Alert queue with risk tiers" width="420"> | <img src="docs/images/console-health.png" alt="Model health: champion vs challenger, PSI, global drivers" width="420"> |
 
-## Models
+- **Alert queue:** KPIs, tier filters, click through to a case
+- **Case review:** SHAP driver chart, grounded narrative, Approve / Escalate / Block / Confirm-fraud with a reason
+- **Model health:** champion vs challenger, operating point, score and feature PSI, global drivers
+- **Governance:** model card, validation findings, audit log
 
-- **Champion: decision tree.** `max_depth=8`, `min_samples_leaf=50`, `class_weight='balanced'`. Every path can be printed for a reviewer.
-- **Challenger: XGBoost.** Up to 1,000 trees, `learning_rate=0.05`, `scale_pos_weight` = negative/positive ratio, `tree_method='hist'`, early stopping on AUC-PR against the valid period.
+It ships with labelled sample cases and the v0.1 metrics. After a pipeline run, `python fraud_classifier/scripts/export_console_data.py` replaces them with real out-of-time alerts.
 
-The challenger replaces the champion only if it wins on the OOT period.
+**Deploy:** Vercel → *Add New Project* → import this repo → **Root Directory `console`**, framework preset *Other*, no build command.
 
-## Monitoring and triage (notebook 3)
+## Explainability and the triage layer
 
-**PSI** compares the valid period (reference) with the OOT period and with the Kaggle test set, using decile bins of the reference and a separate bin for missing values. It runs on the score and on the 20 most important features. Rules of thumb: < 0.10 stable, 0.10–0.25 monitor, > 0.25 review.
+Each alert gets its calibrated probability, a risk tier anchored to the operating threshold, and its top SHAP drivers with plain-language meanings. Vesta masks most columns (C1–C14, D1–D15, M1–M9, V1–V339), so the feature dictionary says "masked count" rather than inventing a meaning.
 
-**Triage.** Each alert gets a risk tier from its calibrated probability (below the operating threshold, no alert), its top SHAP drivers with plain-language meanings, and a short narrative for the analyst:
+The narrative is written by one configured LLM (`ANTHROPIC_API_KEY`, `TRIAGE_MODEL`) from a JSON payload of facts, or by a deterministic template when no key is set. Then:
 
-- With `ANTHROPIC_API_KEY` set, one configured model (`TRIAGE_MODEL`) writes it from a JSON payload of the facts. Without a key, a deterministic template is used.
-- **Grounding check:** any narrative that states a number not present in its input is rejected and replaced by the template. (A sentence like "14x above card average" is rejected unless that figure was actually computed.)
-- **Audit log:** every prompt, its hash, the narrative, its source and the model version go to `outputs/triage_log.jsonl`.
+- **Grounding check.** Every number in the narrative must appear in the payload. "C5 is 14x above the card average" is rejected unless that ratio was actually computed, and the template is used instead.
+- **Audit log.** The prompt, its SHA-256, the narrative, its source and the model version are appended to `outputs/triage_log.jsonl`.
 
-Note: sending transaction data to any external model needs your organization's data-handling approval. The template path keeps everything local.
+> Sending transaction features to an external model requires your organization's data-handling approval. The template path keeps everything local.
 
-## Repository structure
+## Model risk management mapping
 
-```
-fraud_classifier/
-├── notebooks/
-│   ├── 01_eda_feature_engineering.py     # periods, point-in-time features, encodings
-│   ├── 02_model_training_validation.py   # champion/challenger, calibration, threshold, SHAP
-│   ├── 03_risk_pipeline_llm_triage.py    # PSI monitor, triage narratives, RESULTS.md
-│   └── *.ipynb                           # exported from the .py files
-├── scripts/py_to_ipynb.py                # regenerates the .ipynb files from the .py files
-├── outputs/                              # metrics, charts, RESULTS.md
-├── models/                               # trained models + calibrators (not committed)
-├── data/                                 # IEEE-CIS CSVs (not committed)
-└── requirements.txt
-```
+| SR 11-7 element | Evidence in this repo |
+|---|---|
+| Sound development, documented assumptions | Period design, point-in-time features, business assumptions at the top of notebook 2 |
+| Independent validation and outcomes analysis | Untouched out-of-time period; discrimination, calibration and operating-point metrics |
+| Conceptual soundness, explainability | Interpretable champion; per-alert SHAP; plain-language feature dictionary |
+| Ongoing monitoring | Score and feature PSI with stable / monitor / review triggers |
+| Effective challenge | Champion-challenger comparison on the same out-of-time period |
+| Governance and controls | Grounded narratives, audit log, model card and findings in the console |
 
-The `.py` files are the source of truth (percent format, so they open as notebooks in VS Code). After editing one, run `python scripts/py_to_ipynb.py`.
-
-## How to run
+## Quickstart
 
 ```bash
 git clone https://github.com/hiralsarkar/Enterprise-Fraud-Risk-Intelligence-System.git
@@ -120,28 +137,54 @@ cd Enterprise-Fraud-Risk-Intelligence-System/fraud_classifier
 pip install -r requirements.txt
 
 # Data: kaggle competitions download -c ieee-fraud-detection
-# then unzip the CSVs into fraud_classifier/data/ieee-fraud-detection/
-# (or point FRAUD_DATA_DIR at another folder)
+#       unzip into fraud_classifier/data/ieee-fraud-detection/  (or set FRAUD_DATA_DIR)
 
 python notebooks/01_eda_feature_engineering.py
 python notebooks/02_model_training_validation.py
-
-# Optional LLM narratives
-export ANTHROPIC_API_KEY="..."        # Windows: setx ANTHROPIC_API_KEY "..."
+export ANTHROPIC_API_KEY="..."          # optional, for LLM narratives
 python notebooks/03_risk_pipeline_llm_triage.py
+python scripts/export_console_data.py   # refresh the console
+
+python -m http.server -d ../console 8000   # open http://localhost:8000
 ```
 
-Business assumptions (`ALERT_CAPACITY_PER_DAY`, `COST_REVIEW`, `COST_MISSED_FRAUD`) are at the top of notebook 2.
+Tune `ALERT_CAPACITY_PER_DAY`, `COST_REVIEW` and `COST_MISSED_FRAUD` at the top of notebook 2 to match your operation.
 
-## Regulatory alignment
+## Repository layout
 
-- **Development:** documented assumptions, time-ordered periods, point-in-time features
-- **Validation:** KS, Gini, AUC-PR, Brier and operating-point metrics on an untouched out-of-time period
-- **Ongoing monitoring:** PSI on score and features
-- **Explainability:** SHAP per prediction, plain-language driver descriptions, grounded narratives
-- **Champion-challenger:** structured comparison before promotion
-- **Auditability:** logged narratives with model version
+```
+├── fraud_classifier/
+│   ├── notebooks/        01–03 pipeline (.py is the source; .ipynb is exported)
+│   ├── scripts/          py_to_ipynb.py · export_console_data.py
+│   ├── outputs/          metrics, charts, RESULTS.md, triage cases
+│   ├── models/           trained models + calibrators (not committed)
+│   └── data/             IEEE-CIS CSVs (not committed)
+├── console/              static analyst console (Vercel-ready)
+└── docs/images/          screenshots
+```
 
-## Skills demonstrated
+The `.py` notebooks use percent format, so they open as notebooks in VS Code. After editing one, run `python fraud_classifier/scripts/py_to_ipynb.py`.
 
-`Python` `XGBoost` `scikit-learn` `SHAP` `pandas` `LLM API integration` `Model risk management` `SR 11-7` `Fraud detection` `Feature engineering` `Model validation` `Probability calibration` `PSI monitoring`
+## Limitations
+
+- **Public, masked data.** Most IEEE-CIS features are anonymised, which limits how much an explanation can say. Real deployments would have meaningful features.
+- **Labels are final.** Real chargebacks arrive weeks later; production validation must account for label delay.
+- **Batch, not real time.** Scoring runs in notebooks. A scoring service is on the roadmap.
+- **Console decisions are local.** They are saved in the browser, not a system of record.
+
+## Roadmap
+
+- [x] Leakage-free validation, calibration, capacity-based threshold, grounded triage (v0.2)
+- [x] Analyst console
+- [ ] FastAPI scoring service (`/score`, `/explain`, `/triage`), tests, Docker, CI
+- [ ] Customer-level keys and aggregates; LightGBM / CatBoost challengers
+- [ ] Segment stability checks; scheduled drift job with PSI over time
+- [ ] Console backed by the API and a database, with decisions feeding retraining labels
+
+## Tech stack
+
+`Python` · `pandas` · `scikit-learn` · `XGBoost` · `SHAP` · `matplotlib` · `Anthropic API` (optional) · vanilla `HTML/CSS/JS` · `Vercel`
+
+## License
+
+[MIT](LICENSE) © 2026 Hiral Sarkar. The IEEE-CIS dataset is provided by Vesta Corporation under the Kaggle competition rules and is not redistributed here.
