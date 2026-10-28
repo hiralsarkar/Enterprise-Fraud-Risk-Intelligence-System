@@ -1,250 +1,232 @@
-"""
-╔══════════════════════════════════════════════════════════════╗
-║   BFSI FRAUD RISK CLASSIFIER — NOTEBOOK 1                   ║
-║   EDA & Feature Engineering                                  ║
-║   IEEE-CIS Fraud Detection Dataset                          ║
-╚══════════════════════════════════════════════════════════════╝
+# %% [markdown]
+# # EDA & Feature Engineering
+# **IEEE-CIS Fraud Detection (Vesta Corporation)**
+#
+# The dataset ships as a transaction table and an identity table. This notebook merges them,
+# defines the time-ordered **fit / validation / out-of-time (OOT)** periods used everywhere downstream,
+# and builds features that are **point-in-time**: every feature for a transaction uses only that
+# transaction and the ones before it, and every learned encoding is fitted on the fit period only.
+#
+# Run as a script (`python 01_eda_feature_engineering.py`) or open the `.ipynb` export.
+# Outputs go to `../outputs/`.
 
-Run this file as a script or copy cells into Jupyter.
-Outputs are saved to ../outputs/
-"""
-
-# ── CELL 1: Imports & config ──────────────────────────────────
-import pandas as pd
+# %%
+import os, json, warnings
 import numpy as np
+import pandas as pd
+import matplotlib
+if os.environ.get('MPLBACKEND') is None and not os.environ.get('DISPLAY'):
+    matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-import warnings
 warnings.filterwarnings('ignore')
 
-pd.set_option('display.max_columns', 50)
-pd.set_option('display.float_format', '{:.3f}'.format)
-
-import os
-_HERE    = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(_HERE, '..', 'data', 'ieee-fraud-detection') + os.sep
+try:
+    _HERE = os.path.dirname(os.path.abspath(__file__))
+except NameError:            # running inside Jupyter
+    _HERE = os.getcwd()
+DATA_DIR = os.environ.get('FRAUD_DATA_DIR', os.path.join(_HERE, '..', 'data', 'ieee-fraud-detection')) + os.sep
 OUT_DIR  = os.path.join(_HERE, '..', 'outputs') + os.sep
 os.makedirs(OUT_DIR, exist_ok=True)
 
-print("✓ Imports OK")
+# Time-ordered split of the labelled data. The OOT slice is never used for fitting,
+# early stopping, calibration or threshold choice — only for the final report.
+FIT_FRAC, VALID_FRAC = 0.70, 0.15          # OOT = remaining 0.15
 
+# %% [markdown]
+# ## Load & merge
+# Left join on `TransactionID`: not every transaction has an identity record.
 
-# ── CELL 2: Load data ─────────────────────────────────────────
-print("\nLoading data (this takes ~30s on the full dataset)...")
+# %%
+train_txn = pd.read_csv(DATA_DIR + 'train_transaction.csv')
+train_id  = pd.read_csv(DATA_DIR + 'train_identity.csv')
+test_txn  = pd.read_csv(DATA_DIR + 'test_transaction.csv')
+test_id   = pd.read_csv(DATA_DIR + 'test_identity.csv')
+# The Kaggle test identity file uses "id-01" instead of "id_01"
+test_id.columns = [c.replace('-', '_') for c in test_id.columns]
 
-train_txn  = pd.read_csv(DATA_DIR + 'train_transaction.csv')
-train_id   = pd.read_csv(DATA_DIR + 'train_identity.csv')
-test_txn   = pd.read_csv(DATA_DIR + 'test_transaction.csv')
-test_id    = pd.read_csv(DATA_DIR + 'test_identity.csv')
+train = train_txn.merge(train_id, on='TransactionID', how='left').sort_values('TransactionDT').reset_index(drop=True)
+test  = test_txn.merge(test_id,  on='TransactionID', how='left').sort_values('TransactionDT').reset_index(drop=True)
+print(f"Merged train : {train.shape}   Merged test : {test.shape}")
 
-print(f"Train transactions : {train_txn.shape}")
-print(f"Train identity     : {train_id.shape}")
-print(f"Test  transactions : {test_txn.shape}")
-print(f"Test  identity     : {test_id.shape}")
+# %% [markdown]
+# ## Time-ordered periods
+# `TransactionDT` is a seconds offset from an undisclosed reference date, so splits are by position
+# in time, never random.
 
+# %%
+n = len(train)
+fit_end, valid_end = int(n * FIT_FRAC), int(n * (FIT_FRAC + VALID_FRAC))
+train['period'] = np.select([train.index < fit_end, train.index < valid_end], ['fit', 'valid'], 'oot')
+fit_mask = train['period'] == 'fit'
 
-# ── CELL 3: Merge identity tables ────────────────────────────
-train = train_txn.merge(train_id, on='TransactionID', how='left')
-test  = test_txn.merge(test_id,   on='TransactionID', how='left')
-
-print(f"\nMerged train : {train.shape}")
-print(f"Merged test  : {test.shape}")
-
-
-# ── CELL 4: Target overview ───────────────────────────────────
 fraud_rate = train['isFraud'].mean()
-fraud_n    = train['isFraud'].sum()
+print(f"Total {n:,} | fraud {int(train['isFraud'].sum()):,} ({fraud_rate*100:.2f}%)")
+print(train.groupby('period')['isFraud'].agg(['size', 'mean']).rename(columns={'size': 'rows', 'mean': 'fraud_rate'}))
 
-print(f"\n{'═'*45}")
-print(f"  FRAUD OVERVIEW")
-print(f"{'═'*45}")
-print(f"  Total transactions : {len(train):,}")
-print(f"  Fraud cases        : {fraud_n:,}")
-print(f"  Legitimate cases   : {len(train)-fraud_n:,}")
-print(f"  Fraud rate         : {fraud_rate*100:.2f}%")
-print(f"  Class imbalance    : 1 : {round((1-fraud_rate)/fraud_rate)}")
-print(f"{'═'*45}")
+# %% [markdown]
+# ## EDA plots
 
-# ── CELL 5: EDA plots ─────────────────────────────────────────
+# %%
 fig = plt.figure(figsize=(16, 12))
 fig.suptitle('IEEE-CIS Fraud Detection — Exploratory Analysis', fontsize=14, y=0.98)
 gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.4, wspace=0.35)
 
-# 5a: Class imbalance
 ax1 = fig.add_subplot(gs[0, 0])
-counts = train['isFraud'].value_counts()
-bars = ax1.bar(['Legitimate', 'Fraud'], counts.values,
-               color=['#1D9E75', '#D85A30'], width=0.5)
-ax1.set_title('Class distribution', fontsize=11)
-ax1.set_ylabel('Count')
-for bar, count in zip(bars, counts.values):
-    ax1.text(bar.get_x()+bar.get_width()/2, bar.get_height()*1.01,
-             f'{count:,}', ha='center', fontsize=9)
+counts = train['isFraud'].value_counts().sort_index()
+bars = ax1.bar(['Legitimate', 'Fraud'], counts.values, color=['#1D9E75', '#D85A30'], width=0.5)
+ax1.set_title('Class distribution', fontsize=11); ax1.set_ylabel('Count')
+for bar, c in zip(bars, counts.values):
+    ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() * 1.01, f'{c:,}', ha='center', fontsize=9)
 
-# 5b: Transaction amount by fraud
 ax2 = fig.add_subplot(gs[0, 1])
-legit_amt = train[train['isFraud']==0]['TransactionAmt'].clip(upper=1000)
-fraud_amt = train[train['isFraud']==1]['TransactionAmt'].clip(upper=1000)
-ax2.hist(legit_amt, bins=50, alpha=0.6, color='#1D9E75', label='Legit',  density=True)
-ax2.hist(fraud_amt, bins=50, alpha=0.6, color='#D85A30', label='Fraud', density=True)
+for lab, col, name in [(0, '#1D9E75', 'Legit'), (1, '#D85A30', 'Fraud')]:
+    ax2.hist(train.loc[train['isFraud'] == lab, 'TransactionAmt'].clip(upper=1000), bins=50,
+             alpha=0.6, color=col, label=name, density=True)
 ax2.set_title('Transaction amount distribution', fontsize=11)
-ax2.set_xlabel('Amount (USD, clipped at $1000)')
-ax2.legend(fontsize=9)
+ax2.set_xlabel('Amount (USD, clipped at $1000)'); ax2.legend(fontsize=9)
 
-# 5c: Fraud rate by ProductCD
 ax3 = fig.add_subplot(gs[0, 2])
 prod = train.groupby('ProductCD')['isFraud'].mean().sort_values(ascending=False)
-bars3 = ax3.bar(prod.index, prod.values*100, color='#534AB7', width=0.5)
-ax3.set_title('Fraud rate by product code', fontsize=11)
-ax3.set_ylabel('Fraud rate (%)')
-for bar, val in zip(bars3, prod.values*100):
-    ax3.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.1,
-             f'{val:.1f}%', ha='center', fontsize=8)
+ax3.bar(prod.index, prod.values * 100, color='#534AB7', width=0.5)
+ax3.set_title('Fraud rate by product code', fontsize=11); ax3.set_ylabel('Fraud rate (%)')
 
-# 5d: Fraud rate by card type
 ax4 = fig.add_subplot(gs[1, 0])
 card = train.groupby('card4')['isFraud'].mean().dropna().sort_values(ascending=False)
-ax4.barh(card.index, card.values*100, color='#534AB7')
-ax4.set_title('Fraud rate by card network', fontsize=11)
-ax4.set_xlabel('Fraud rate (%)')
+ax4.barh(card.index, card.values * 100, color='#534AB7')
+ax4.set_title('Fraud rate by card network', fontsize=11); ax4.set_xlabel('Fraud rate (%)')
 
-# 5e: Fraud rate by card6 (debit/credit)
 ax5 = fig.add_subplot(gs[1, 1])
 c6 = train.groupby('card6')['isFraud'].mean().dropna().sort_values(ascending=False)
-ax5.bar(c6.index, c6.values*100, color=['#D85A30','#1D9E75','#534AB7','#BA7517'][:len(c6)], width=0.4)
-ax5.set_title('Fraud rate by card type', fontsize=11)
-ax5.set_ylabel('Fraud rate (%)')
+ax5.bar(c6.index, c6.values * 100, color='#534AB7', width=0.4)
+ax5.set_title('Fraud rate by card type', fontsize=11); ax5.set_ylabel('Fraud rate (%)')
 
-# 5f: Transaction time pattern (hour of day proxy)
 ax6 = fig.add_subplot(gs[1, 2])
-# TransactionDT is seconds from reference point; derive hour-of-day
-train['hour'] = (train['TransactionDT'] // 3600) % 24
-hour_fraud = train.groupby('hour')['isFraud'].mean()
-ax6.plot(hour_fraud.index, hour_fraud.values*100, color='#D85A30', linewidth=2)
-ax6.fill_between(hour_fraud.index, hour_fraud.values*100, alpha=0.15, color='#D85A30')
-ax6.set_title('Fraud rate by hour of day', fontsize=11)
-ax6.set_xlabel('Hour (UTC)')
-ax6.set_ylabel('Fraud rate (%)')
+# Hour relative to the undisclosed reference time, NOT a clock hour in any known timezone
+hour_fraud = train.groupby((train['TransactionDT'] // 3600) % 24)['isFraud'].mean()
+ax6.plot(hour_fraud.index, hour_fraud.values * 100, color='#D85A30', linewidth=2)
+ax6.set_title('Fraud rate by relative hour (TransactionDT offset)', fontsize=11)
+ax6.set_xlabel('Hour of day, relative'); ax6.set_ylabel('Fraud rate (%)')
 
 plt.savefig(OUT_DIR + '01_eda_overview.png', dpi=150, bbox_inches='tight')
-plt.show()
-print(f"\n✓ EDA plot saved → {OUT_DIR}01_eda_overview.png")
+plt.close(fig)
 
+# %% [markdown]
+# ## Drop near-empty columns
+# Decided on the **fit period only**, then applied to every period and to the Kaggle test set.
 
-# ── CELL 6: Null analysis ─────────────────────────────────────
-null_pct = (train.isnull().sum() / len(train) * 100).sort_values(ascending=False)
-# Drop columns with >90% nulls — not enough signal
-drop_cols = null_pct[null_pct > 90].index.tolist()
-print(f"\nColumns with >90% nulls (will drop): {len(drop_cols)}")
-print(f"First 10: {drop_cols[:10]}")
-
+# %%
+null_pct = train.loc[fit_mask].isnull().mean() * 100
+drop_cols = [c for c in null_pct[null_pct > 90].index if c not in ('isFraud', 'period')]
 train.drop(columns=drop_cols, inplace=True)
 test.drop(columns=[c for c in drop_cols if c in test.columns], inplace=True)
-print(f"\nDataset after null-drop: {train.shape}")
+print(f"Dropped {len(drop_cols)} columns with >90% nulls in the fit period")
 
+# %% [markdown]
+# ## Point-in-time feature engineering
+# Card history features use only **earlier** transactions on the same `card1` (cumulative sums shifted
+# by one row), so no transaction sees its own future. Train and Kaggle test are processed as one
+# chronological stream: test transactions happen after train and may use train history, which is what
+# a live system would see.
+#
+# | Feature | Definition |
+# |---|---|
+# | `amt_log` | log(1 + amount) |
+# | `card1_txn_count_7d` | transactions on this card in the previous 7 days |
+# | `card1_prior_amt_mean` | mean amount of earlier transactions on this card |
+# | `amt_zscore` | amount vs. this card's earlier amounts (0 when fewer than 2 earlier txns) |
+# | `secs_since_prev_card_txn` | seconds since the previous transaction on this card |
+# | `email_mismatch` | purchaser and recipient email domains both present and different |
+# | `P_email_anon` | purchaser email missing or `anonymous.com` |
+# | `dt_hour` | hour of day relative to the undisclosed reference (not a known timezone) |
+# | `is_large_txn` | amount > $500 |
+# | `C_sum` | sum of the C count columns |
+# | `is_mobile` | DeviceType is mobile |
 
-# ── CELL 7: Feature engineering ──────────────────────────────
-print("\nEngineering features...")
-
+# %%
 def engineer_features(df):
+    """df must be sorted by TransactionDT. Uses only current and earlier rows."""
     df = df.copy()
+    amt = df['TransactionAmt']
+    df['amt_log'] = np.log1p(amt)
 
-    # 1. Log-transform transaction amount (right-skewed)
-    df['amt_log'] = np.log1p(df['TransactionAmt'])
+    card = df['card1'].fillna(-1)
+    g = amt.groupby(card)
+    n_prior = g.cumcount()
+    sum_prior = g.cumsum() - amt
+    sq_prior = (amt ** 2).groupby(card).cumsum() - amt ** 2
+    mean_prior = sum_prior / n_prior.replace(0, np.nan)
+    var_prior = (sq_prior - n_prior * mean_prior ** 2) / (n_prior - 1).replace(0, np.nan)
+    std_prior = np.sqrt(var_prior.clip(lower=0))
+    # Velocity over a fixed 7-day window (an all-time count would grow with time and drift by construction)
+    week = 7 * 86400
+    df['card1_txn_count_7d'] = df['TransactionDT'].groupby(card).transform(
+        lambda t: np.arange(len(t)) - np.searchsorted(t.values, t.values - week, side='left'))
+    df['card1_prior_amt_mean'] = mean_prior
+    df['amt_zscore'] = ((amt - mean_prior) / std_prior.replace(0, np.nan)).fillna(0).clip(-20, 20)
+    df['secs_since_prev_card_txn'] = df['TransactionDT'].groupby(card).diff()
 
-    # 2. Amount z-score per card1 (unusual spend for that card)
-    card_stats = df.groupby('card1')['TransactionAmt'].agg(['mean','std']).reset_index()
-    card_stats.columns = ['card1','card1_amt_mean','card1_amt_std']
-    df = df.merge(card_stats, on='card1', how='left')
-    df['amt_zscore'] = (
-        (df['TransactionAmt'] - df['card1_amt_mean'])
-        / df['card1_amt_std'].replace(0, np.nan)
-    ).fillna(0)
+    p, r = df['P_emaildomain'], df['R_emaildomain']
+    df['email_mismatch'] = (p.notna() & r.notna() & (p != r)).astype(int)
+    df['P_email_anon'] = (p.isna() | (p == 'anonymous.com')).astype(int)
 
-    # 3. Email domain mismatch (purchaser vs recipient)
-    df['email_mismatch'] = (
-        df['P_emaildomain'].fillna('') != df['R_emaildomain'].fillna('')
-    ).astype(int)
-
-    # 4. High-risk email domain flag
-    risky_domains = ['gmail.com','yahoo.com','hotmail.com','anonymous.com','']
-    df['P_email_risky'] = df['P_emaildomain'].fillna('').isin(risky_domains).astype(int)
-
-    # 5. Hour of day (from TransactionDT)
-    df['hour'] = (df['TransactionDT'] // 3600) % 24
-    df['is_night'] = ((df['hour'] >= 0) & (df['hour'] < 6)).astype(int)
-
-    # 6. Transaction count per card (velocity proxy)
-    card_txn_count = df.groupby('card1')['TransactionID'].transform('count')
-    df['card1_txn_count'] = card_txn_count
-
-    # 7. Addr mismatch (billing vs shipping country proxy)
-    df['addr_mismatch'] = (
-        df['addr1'].fillna(-1) != df['addr2'].fillna(-1)
-    ).astype(int)
-
-    # 8. Large transaction flag (>500 USD)
-    df['is_large_txn'] = (df['TransactionAmt'] > 500).astype(int)
-
-    # 9. C-column sum (count features — number of previous addresses etc)
+    df['dt_hour'] = (df['TransactionDT'] // 3600) % 24
+    df['is_large_txn'] = (amt > 500).astype(int)
     c_cols = [c for c in df.columns if c.startswith('C') and c[1:].isdigit()]
     df['C_sum'] = df[c_cols].fillna(0).sum(axis=1)
-
-    # 10. Device type binary
-    df['is_mobile'] = (df.get('DeviceType','').fillna('') == 'mobile').astype(int)
-
+    dev = df['DeviceType'] if 'DeviceType' in df.columns else pd.Series('', index=df.index)
+    df['is_mobile'] = (dev.fillna('') == 'mobile').astype(int)
     return df
 
-train = engineer_features(train)
-test  = engineer_features(test)
+stream = pd.concat([train.assign(_src='train'), test.assign(_src='test')], ignore_index=True)
+stream = engineer_features(stream.sort_values('TransactionDT', kind='stable').reset_index(drop=True))
+train = stream[stream['_src'] == 'train'].drop(columns='_src').reset_index(drop=True)
+test  = stream[stream['_src'] == 'test'].drop(columns=['_src', 'isFraud', 'period'], errors='ignore').reset_index(drop=True)
+fit_mask = train['period'] == 'fit'
 
-new_features = ['amt_log','amt_zscore','email_mismatch','P_email_risky',
-                'hour','is_night','card1_txn_count','addr_mismatch',
-                'is_large_txn','C_sum','is_mobile']
+NEW_FEATURES = ['amt_log', 'card1_txn_count_7d', 'card1_prior_amt_mean', 'amt_zscore',
+                'secs_since_prev_card_txn', 'email_mismatch', 'P_email_anon', 'dt_hour',
+                'is_large_txn', 'C_sum', 'is_mobile']
+print(train.loc[fit_mask].groupby('isFraud')[NEW_FEATURES].mean().T.rename(columns={0: 'legit', 1: 'fraud'}))
 
-print(f"✓ Engineered {len(new_features)} new features:")
-for f in new_features:
-    fraud_mean = train.groupby('isFraud')[f].mean()
-    print(f"  {f:<22} legit={fraud_mean.get(0,0):.3f}  fraud={fraud_mean.get(1,0):.3f}")
+# %% [markdown]
+# ## Encode categoricals
+# Frequency encoding with counts learned on the **fit period only**; unseen categories get 0.
 
-
-# ── CELL 8: Encode categoricals ───────────────────────────────
-cat_cols = train.select_dtypes(include='object').columns.tolist()
-cat_cols = [c for c in cat_cols if c not in ['TransactionID'] and c in test.columns]
-
-print(f"\nEncoding {len(cat_cols)} categorical columns...")
+# %%
+cat_cols = [c for c in train.select_dtypes(include='object').columns if c not in ('period',) and c in test.columns]
 for col in cat_cols:
-    # Label-encode as frequency rank (works well for tree models)
-    freq = train[col].value_counts()
+    freq = train.loc[fit_mask, col].value_counts()
     train[col] = train[col].map(freq).fillna(0)
     test[col]  = test[col].map(freq).fillna(0)
+print(f"Frequency-encoded {len(cat_cols)} categorical columns")
 
-print("✓ Categorical encoding done")
+# %% [markdown]
+# ## Final feature set
+# `TransactionDT` is excluded: it is a clock, so the model would learn time trends that do not
+# carry into the future. Raw `card1` stays (it is an identifier the trees can bucket) but its
+# history comes only through the point-in-time features above.
 
-
-# ── CELL 9: Prepare final feature set ────────────────────────
-DROP = ['TransactionID', 'isFraud', 'hour',   # hour already captured in is_night
-        'card1_amt_mean', 'card1_amt_std']     # intermediate cols
-
+# %%
+DROP = ['TransactionID', 'isFraud', 'period', 'TransactionDT']
 FEATURES = [c for c in train.columns if c not in DROP and c in test.columns]
 
 X_train = train[FEATURES].fillna(-999)
-y_train = train['isFraud']
+y_train = train['isFraud'].astype(int)
 X_test  = test[FEATURES].fillna(-999)
 
-print(f"\nFinal feature count : {len(FEATURES)}")
-print(f"X_train shape       : {X_train.shape}")
-print(f"X_test  shape       : {X_test.shape}")
-print(f"Fraud rate in train : {y_train.mean()*100:.2f}%")
-
-# Save for notebook 2
 X_train.to_parquet(OUT_DIR + 'X_train.parquet', index=False)
 y_train.to_frame().to_parquet(OUT_DIR + 'y_train.parquet', index=False)
 X_test.to_parquet(OUT_DIR + 'X_test.parquet', index=False)
+train[['TransactionID', 'TransactionDT', 'period']].to_parquet(OUT_DIR + 'train_meta.parquet', index=False)
+test[['TransactionID', 'TransactionDT']].to_parquet(OUT_DIR + 'test_meta.parquet', index=False)
 
-import json
 with open(OUT_DIR + 'features.json', 'w') as f:
     json.dump(FEATURES, f)
+with open(OUT_DIR + 'eda_stats.json', 'w') as f:
+    json.dump({'total_transactions': int(n), 'fraud_count': int(y_train.sum()),
+               'fraud_rate_pct': round(float(fraud_rate) * 100, 2), 'feature_count': len(FEATURES),
+               'periods': {p: int((train['period'] == p).sum()) for p in ('fit', 'valid', 'oot')}}, f, indent=2)
 
-print(f"\n✓ Saved X_train, y_train, X_test → {OUT_DIR}")
-print("✓ Notebook 1 complete — run 02_model_training.py next")
+print(f"Features: {len(FEATURES)} | X_train {X_train.shape} | X_test {X_test.shape}")
+print("Notebook 1 complete — run 02_model_training_validation.py next")
