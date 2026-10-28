@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fraud Risk Console</title>
+<meta name="description" content="Analyst console for the Enterprise Fraud Risk Intelligence System: alert queue, SHAP case review, model health and governance.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F59E0B' stroke-width='2.2'%3E%3Cpath d='M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z'/%3E%3Cpath d='M9 12l2 2 4-4'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <a class="brand" href="#/queue">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg>
+    <span>Fraud Risk Console</span>
+  </a>
+  <nav class="tabs" aria-label="Views">
+    <a href="#/queue" data-view="queue">Alert queue</a>
+    <a href="#/case" data-view="case">Case</a>
+    <a href="#/health" data-view="health">Model health</a>
+    <a href="#/governance" data-view="governance">Governance</a>
+  </nav>
+  <div class="meta" id="meta"></div>
+</header>
+<div class="banner" id="banner" hidden></div>
+<main id="main" tabindex="-1"><p class="muted">Loading…</p></main>
+<footer class="foot">
+  <span>Enterprise Fraud Risk Intelligence System · IEEE-CIS data (Vesta)</span>
+  <a href="https://github.com/hiralsarkar/Enterprise-Fraud-Risk-Intelligence-System">Source on GitHub</a>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>
