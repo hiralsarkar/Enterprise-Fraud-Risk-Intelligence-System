@@ -1,5 +1,17 @@
 [project]
 name = "fraud-classifier-project"
-version = "0.1.0"
-requires-python = ">=3.13"
-dependencies = []
+version = "0.2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "scikit-learn>=1.3.0",
+    "xgboost>=2.0.0",
+    "shap>=0.44.0",
+    "matplotlib>=3.7.0",
+    "pyarrow>=12.0.0",
+    "joblib>=1.3.0",
+]
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.40.0", "python-dotenv>=1.0.0"]

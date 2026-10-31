@@ -9,3 +9,5 @@ __pycache__/
 outputs/X_train.parquet
 outputs/X_test.parquet
 outputs/y_train.parquet
+outputs/triage_log.jsonl
+outputs/*_meta.parquet
