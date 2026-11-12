@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fraud Risk Intelligence System</title>
+<meta name="description" content="A fraud detection pipeline on the IEEE-CIS dataset: XGBoost scoring, SHAP explanations, drafted case notes and drift monitoring, built to SR 11-7 standards.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+html{-webkit-text-size-adjust:100%}body{margin:0}img{max-width:100%}[hidden]{display:none!important}
+/* Layout: security-paper ground, a live scoring feed as the hero, then one long column of working sections. */
+:root{
+  --bg:#edf2ee; --surface:#f8fbf8; --sunk:#e2e9e4; --ink:#12251f; --muted:#54665e; --line:#c8d4cc;
+  --accent:#0b6b52; --on-accent:#f4fbf8;
+  --low:#2b7a58; --med:#a8730a; --high:#c2521a; --crit:#b0202e;
+  --display:"Bricolage Grotesque","IBM Plex Sans",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0d1916; --surface:#14231e; --sunk:#0a1411; --ink:#e3ece7; --muted:#93a69d; --line:#2a3d36;
+  --accent:#4fc9a1; --on-accent:#06231a; --low:#5fc596; --med:#e0b043; --high:#f08a4b; --crit:#f2666f; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0d1916; --surface:#14231e; --sunk:#0a1411; --ink:#e3ece7; --muted:#93a69d; --line:#2a3d36;
+  --accent:#4fc9a1; --on-accent:#06231a; --low:#5fc596; --med:#e0b043; --high:#f08a4b; --crit:#f2666f; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:400 16px/1.55 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 64px}
+.wrap{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:72px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.08}
+h1{font-size:clamp(2.2rem,5.6vw,3.9rem);font-weight:700;letter-spacing:-.02em}
+h2{font-size:clamp(1.5rem,3vw,2.1rem);font-weight:700;letter-spacing:-.01em}
+h3{font-size:1.05rem;font-weight:500}
+p{margin:0;max-width:65ch}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono,.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.label{font:500 .72rem/1.2 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.muted{color:var(--muted)}
+.note{font-size:.86rem;color:var(--muted)}
+section{display:flex;flex-direction:column;gap:22px}
+.head{display:flex;flex-direction:column;gap:8px}
+
+nav{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;justify-content:space-between;padding-block:18px;border-bottom:1px solid var(--line)}
+nav .links{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:.9rem}
+nav a{text-decoration:none}
+nav a:hover{text-decoration:underline}
+.brand{font:500 .8rem var(--mono);letter-spacing:.06em;color:var(--muted)}
+
+.hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:40px;align-items:start;padding-top:44px}
+.hero-copy{display:flex;flex-direction:column;gap:20px}
+.hero-copy p{font-size:1.08rem}
+.facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;border-top:1px solid var(--line);padding-top:16px}
+.facts b{display:block;font:500 1.45rem var(--mono);font-variant-numeric:tabular-nums}
+.btns{display:flex;flex-wrap:wrap;gap:10px}
+.btn{font:500 .92rem var(--body);padding:10px 16px;border-radius:4px;border:1px solid var(--accent);background:var(--accent);color:var(--on-accent);cursor:pointer;text-decoration:none}
+.btn.ghost{background:transparent;color:var(--accent)}
+.btn:hover{filter:brightness(1.08)}
+
+.feed{background:var(--surface);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.feed-top{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.live{display:inline-flex;align-items:center;gap:7px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--low)}
+.feed.running .dot{animation:pulse 1.4s infinite}
+@keyframes pulse{50%{opacity:.25}}
+.linkbtn{background:none;border:0;padding:0;color:var(--accent);font:500 .82rem var(--mono);cursor:pointer;text-decoration:underline}
+.rows{list-style:none;margin:0;padding:0;height:336px;overflow:hidden}
+.row{display:grid;grid-template-columns:5.2em minmax(0,1fr) 4.6em 5.6em;gap:10px;align-items:center;padding:0 14px;height:42px;border-bottom:1px solid var(--line);font:400 .82rem var(--mono);font-variant-numeric:tabular-nums}
+.row.new{animation:drop .35s ease-out}
+@keyframes drop{from{opacity:0;transform:translateY(-10px)}}
+.row .what{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
+.row .what b{color:var(--ink);font-weight:500}
+.row .p{text-align:right}
+.pill{display:inline-block;font:500 .68rem var(--mono);letter-spacing:.06em;padding:3px 7px;border-radius:3px;border:1px solid currentColor;text-align:center}
+.LOW{color:var(--low)}.MEDIUM{color:var(--med)}.HIGH{color:var(--high)}.CRITICAL{color:var(--crit)}
+.pill.CRITICAL{background:var(--crit);color:var(--surface);border-color:var(--crit)}
+.tally{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));background:var(--sunk)}
+.tally div{padding:10px 14px}
+.tally b{display:block;font:500 1.1rem var(--mono);font-variant-numeric:tabular-nums}
+
+.lab{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:0;background:var(--surface);border:1px solid var(--line);border-radius:6px}
+.lab>div{padding:22px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.lab .out{border-left:1px solid var(--line)}
+.presets{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font:500 .8rem var(--body);padding:6px 11px;border-radius:99px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+.chip:hover,.chip[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.field{display:flex;flex-direction:column;gap:5px}
+.field .top{display:flex;justify-content:space-between;gap:8px;font-size:.88rem}
+.field code{font:400 .72rem var(--mono);color:var(--muted)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+select{font:400 .9rem var(--body);padding:7px 8px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink);width:100%}
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.checks{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:.9rem}
+.checks label{display:flex;gap:7px;align-items:center}
+.checks input{accent-color:var(--accent);width:16px;height:16px}
+
+.verdict{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.score{font:700 clamp(2.8rem,7vw,4.2rem)/1 var(--display);font-variant-numeric:tabular-nums}
+.meter{position:relative;height:12px;border-radius:2px;background:linear-gradient(90deg,var(--low) 0 30%,var(--med) 30% 50%,var(--high) 50% 75%,var(--crit) 75%)}
+.meter i{position:absolute;top:-5px;width:3px;height:22px;background:var(--ink);transform:translateX(-50%);transition:left .3s}
+.scale{display:flex;justify-content:space-between;font:400 .68rem var(--mono);color:var(--muted)}
+.drivers{display:flex;flex-direction:column;gap:6px}
+.drv{display:grid;grid-template-columns:9.5em minmax(0,1fr) 3.6em;gap:8px;align-items:center;font:400 .78rem var(--mono)}
+.drv .track{display:grid;grid-template-columns:1fr 1fr;height:14px;background:var(--sunk)}
+.drv .neg{justify-self:end;background:var(--low);height:100%}
+.drv .pos{grid-column:2;background:var(--crit);height:100%}
+.drv .v{text-align:right;font-variant-numeric:tabular-nums}
+.sar{background:var(--sunk);border-left:3px solid currentColor;padding:14px 16px;font:400 .86rem/1.6 var(--mono)}
+.sar span{color:var(--ink)}
+
+.steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border:1px solid var(--line);border-radius:6px;background:var(--surface);list-style:none;margin:0;padding:0}
+.steps li{padding:18px 16px;display:flex;flex-direction:column;gap:8px;border-left:1px solid var(--line);min-width:0}
+.steps li:first-child{border-left:0}
+.steps .n{font:500 .75rem var(--mono);color:var(--accent)}
+.steps p{font-size:.88rem;color:var(--muted)}
+.steps .k{font:500 .8rem var(--mono);margin-top:auto}
+
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:36px}
+.panel{display:flex;flex-direction:column;gap:14px;min-width:0}
+.metric{display:flex;flex-direction:column;gap:5px}
+.metric .top{display:flex;justify-content:space-between;font-size:.9rem;gap:8px}
+.bar{position:relative;height:13px;background:var(--sunk)}
+.bar>span{position:absolute;inset:0 auto 0 0}
+.bar .ch{background:var(--muted)}
+.bar .xg{background:var(--accent)}
+.bar .bm{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--crit)}
+.pair{display:flex;flex-direction:column;gap:3px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.8rem;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;margin-right:6px}
+.shap{display:grid;grid-template-columns:8.5em minmax(0,1fr) 3.2em;gap:6px 10px;align-items:center;font:400 .8rem var(--mono)}
+.shap .b{height:13px;background:var(--accent)}
+.shap .v{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.psi{position:relative;height:14px;background:linear-gradient(90deg,var(--low) 0 40%,var(--med) 40% 100%);margin-top:16px}
+.psi i{position:absolute;top:-6px;width:3px;height:26px;background:var(--ink)}
+.psi em{position:absolute;top:-24px;font:500 .7rem var(--mono);font-style:normal;white-space:nowrap}
+
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:520px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:500 .72rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+
+.code{position:relative;background:var(--sunk);border:1px solid var(--line);border-radius:6px}
+.code pre{margin:0;padding:18px;overflow-x:auto;font:400 .82rem/1.7 var(--mono)}
+.code .c{color:var(--muted)}
+.code button{position:absolute;top:10px;right:10px}
+.limits{margin:0;padding-left:1.1em;display:flex;flex-direction:column;gap:8px;max-width:70ch}
+footer{border-top:1px solid var(--line);padding-top:20px;font-size:.86rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:8px 24px;justify-content:space-between}
+
+@media (max-width:820px){
+  .hero,.lab,.grid2{grid-template-columns:minmax(0,1fr)}
+  .lab .out{border-left:0;border-top:1px solid var(--line)}
+  .steps{grid-template-columns:minmax(0,1fr)}
+  .steps li{border-left:0;border-top:1px solid var(--line)}
+  .steps li:first-child{border-top:0}
+  .wrap{gap:56px}
+}
+@media (max-width:460px){
+  .row{grid-template-columns:minmax(0,1fr) 3.6em 5.4em}.row .id{display:none}
+  .tally{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .two{grid-template-columns:minmax(0,1fr)}
+  .drv{grid-template-columns:7.2em minmax(0,1fr) 3.2em}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<div>
+<nav>
+  <span class="brand">HIRAL SARKAR / FRAUD RISK</span>
+  <span class="links"><a href="#try">Score a transaction</a><a href="#how">How it works</a><a href="#results">Results</a><a href="#run">Run it</a><a href="https://github.com/hiralsarkar/Enterprise-Fraud-Risk-Intelligence-System" target="_blank" rel="noopener">GitHub ↗</a></span>
+</nav>
+
+<header class="hero">
+  <div class="hero-copy">
+    <span class="label">IEEE-CIS · SR 11-7 aligned</span>
+    <h1>Every card payment gets a fraud score, a reason and a next step.</h1>
+    <p>The Enterprise Fraud Risk Intelligence System scores transactions with XGBoost, explains each score with SHAP, writes the analyst's case note, and watches itself for drift. It is built the way a bank's model risk team would ask for it.</p>
+    <div class="btns"><a class="btn" href="#try">Score a transaction</a><a class="btn ghost" href="#results">See the validation</a></div>
+    <div class="facts">
+      <div><b>590,540</b><span class="note">transactions trained on</span></div>
+      <div><b>3.50%</b><span class="note">of them are fraud</span></div>
+      <div><b>0.911</b><span class="note">AUC-ROC on later data</span></div>
+    </div>
+  </div>
+
+  <div class="feed" id="feed" aria-label="Simulated live transaction feed">
+    <div class="feed-top">
+      <span class="live label"><span class="dot"></span>Scoring feed · simulated</span>
+      <button class="linkbtn" id="feedToggle" type="button">Pause</button>
+    </div>
+    <ul class="rows" id="rows"></ul>
+    <div class="tally">
+      <div><b id="tScored">0</b><span class="label">Scored</span></div>
+      <div><b id="tReview">0</b><span class="label">To review</span></div>
+      <div><b id="tBlocked">0</b><span class="label">Blocked</span></div>
+      <div><b id="tSaved">$0</b><span class="label">Held back</span></div>
+    </div>
+  </div>
+</header>
+</div>
+
+<section id="try">
+  <div class="head">
+    <span class="label">Try it</span>
+    <h2>Change the payment. Watch the score move.</h2>
+    <p class="muted">Pick a scenario or set the inputs yourself. You get what an analyst gets: a probability, the factors behind it, and a drafted case note.</p>
+  </div>
+  <div class="lab">
+    <div>
+      <div class="presets" id="presets">
+        <button class="chip" type="button" data-p="grocery">Weekly grocery run</button>
+        <button class="chip" type="button" data-p="testing">3 a.m. card testing</button>
+        <button class="chip" type="button" data-p="takeover">Account takeover</button>
+        <button class="chip" type="button" data-p="travel">Big purchase, known customer</button>
+      </div>
+      <div class="field">
+        <div class="top"><label for="amt">Amount</label><span class="num" id="amtV"></span></div>
+        <input type="range" id="amt" min="5" max="3000" step="5">
+        <code>TransactionAmt · amt_zscore · is_large_txn</code>
+      </div>
+      <div class="field">
+        <div class="top"><label for="avg">This card's usual spend</label><span class="num" id="avgV"></span></div>
+        <input type="range" id="avg" min="10" max="800" step="5">
+      </div>
+      <div class="field">
+        <div class="top"><label for="hist">Past payments on this card</label><span class="num" id="histV"></span></div>
+        <input type="range" id="hist" min="0" max="800" step="1">
+        <code>card1_txn_count</code>
+      </div>
+      <div class="field">
+        <div class="top"><label for="cnt">Addresses and devices linked to the card</label><span class="num" id="cntV"></span></div>
+        <input type="range" id="cnt" min="0" max="30" step="1">
+        <code>C5 · C14 · C1</code>
+      </div>
+      <div class="two">
+        <div class="field"><label for="email" class="top">Buyer's email</label>
+          <select id="email"><option value="isp">comcast.net</option><option value="free">gmail.com</option><option value="anon">anonymous.com</option><option value="proton">protonmail.com</option></select></div>
+        <div class="field"><label for="hour" class="top">Hour (UTC)</label>
+          <select id="hour"></select></div>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="emis"> Recipient email differs</label>
+        <label><input type="checkbox" id="addr"> Billing ≠ shipping</label>
+        <label><input type="checkbox" id="mob"> Mobile device</label>
+      </div>
+    </div>
+    <div class="out" aria-live="polite">
+      <div class="verdict">
+        <div><span class="label">Fraud probability</span><div class="score" id="score"></div></div>
+        <span class="pill" id="level" style="font-size:.85rem;padding:6px 12px"></span>
+      </div>
+      <div>
+        <div class="meter"><i id="needle"></i></div>
+        <div class="scale"><span>0</span><span>30 review</span><span>50 escalate</span><span>75 block</span><span>100</span></div>
+      </div>
+      <div>
+        <span class="label">What pushed the score</span>
+        <div class="drivers" id="drivers" style="margin-top:8px"></div>
+      </div>
+      <div>
+        <span class="label">Drafted case note</span>
+        <div class="sar" id="sar" style="margin-top:8px"></div>
+      </div>
+      <p class="note">This playground runs a small scorer in your browser, weighted to follow the model's SHAP ranking. The trained XGBoost binary is not in the repo, so these are illustrative scores. The numbers under Results are the real ones.</p>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="head"><span class="label">How it works</span><h2>Five steps from raw payment to audit trail</h2></div>
+  <ol class="steps">
+    <li><span class="n">STEP 1</span><h3>Ingest</h3><p>Join Vesta's transaction table (55 columns) with the identity table (41 columns).</p><span class="k">590,540 rows</span></li>
+    <li><span class="n">STEP 2</span><h3>Engineer</h3><p>Add ten bank-style signals: spend z-score per card, email and address mismatch, night-time, velocity.</p><span class="k">63 features</span></li>
+    <li><span class="n">STEP 3</span><h3>Classify</h3><p>A depth-8 decision tree is the explainable champion. XGBoost with 300 trees is the challenger.</p><span class="k">2 models</span></li>
+    <li><span class="n">STEP 4</span><h3>Triage</h3><p>SHAP names the top factors for each flagged payment. An LLM turns them into a SAR-style note.</p><span class="k">~15 min saved per case</span></li>
+    <li><span class="n">STEP 5</span><h3>Monitor</h3><p>KS and Gini on a time-ordered holdout, then PSI to catch population drift after launch.</p><span class="k">PSI 0.001</span></li>
+  </ol>
+</section>
+
+<section id="results">
+  <div class="head">
+    <span class="label">Results</span>
+    <h2>The challenger wins on every measure a validator checks</h2>
+    <p class="muted">Tested on the last 20% of transactions by time, never a random split. Accuracy is left out on purpose: at a 3.5% fraud rate, calling everything legitimate scores 96.5%.</p>
+  </div>
+  <div class="grid2">
+    <div class="panel">
+      <div id="metrics" style="display:flex;flex-direction:column;gap:16px"></div>
+      <div class="legend"><span><i style="background:var(--muted)"></i>Decision tree (champion)</span><span><i style="background:var(--accent)"></i>XGBoost (challenger)</span><span><i style="background:var(--crit);width:2px"></i>SR 11-7 benchmark</span></div>
+    </div>
+    <div class="panel">
+      <h3>What the model looks at most</h3>
+      <div class="shap" id="shap"></div>
+      <p class="note">Mean absolute SHAP value, top 10 of 63 features. C-columns are Vesta's counts of addresses, devices and cards tied to the payment.</p>
+    </div>
+  </div>
+  <div class="grid2">
+    <div class="panel">
+      <h3>Drift check</h3>
+      <p class="muted" style="font-size:.92rem">PSI compares the score distribution the model was trained on with what it sees later. Under 0.10 is stable. Over 0.25 means the model goes back for review.</p>
+      <div class="psi"><i style="left:.4%"></i><em style="left:0">0.00105 train → validation · 0.00046 train → test</em></div>
+      <div class="scale"><span>0</span><span>0.10 minor drift</span><span>0.25 review</span></div>
+    </div>
+    <div class="panel">
+      <h3>What each score triggers</h3>
+      <div class="tablewrap"><table>
+        <tr><th>Score</th><th>Level</th><th>Action</th></tr>
+        <tr><td class="num">&lt; 30%</td><td><span class="pill LOW">LOW</span></td><td>Auto-approve.</td></tr>
+        <tr><td class="num">30 to 50%</td><td><span class="pill MEDIUM">MEDIUM</span></td><td>Manual review within 4 hours.</td></tr>
+        <tr><td class="num">50 to 75%</td><td><span class="pill HIGH">HIGH</span></td><td>Senior analyst. Consider a hold.</td></tr>
+        <tr><td class="num">≥ 75%</td><td><span class="pill CRITICAL">CRITICAL</span></td><td>Block. Notify compliance.</td></tr>
+      </table></div>
+    </div>
+  </div>
+</section>
+
+<section id="run">
+  <div class="head"><span class="label">Run it</span><h2>Reproduce it on your machine</h2>
+    <p class="muted">You need Python and the Kaggle IEEE-CIS files. The OpenRouter key is optional: without it the triage step falls back to a template note.</p></div>
+  <div class="code">
+    <button class="btn ghost" id="copy" type="button">Copy</button>
+<pre id="cmd"><span class="c"># 1. Clone and install</span>
+git clone https://github.com/hiralsarkar/Enterprise-Fraud-Risk-Intelligence-System.git
+cd Enterprise-Fraud-Risk-Intelligence-System/fraud_classifier
+pip install -r requirements.txt
+
+<span class="c"># 2. Put the Kaggle CSVs in ./data/ieee-fraud-detection/</span>
+kaggle competitions download -c ieee-fraud-detection
+
+<span class="c"># 3. Features, then models, then triage and drift</span>
+python notebooks/01_eda_feature_engineering.py
+python notebooks/02_model_training_validation.py
+export OPENROUTER_API_KEY="your-key-here"   <span class="c"># optional</span>
+python notebooks/03_risk_pipeline_llm_triage.py
+
+<span class="c"># 4. Open the analyst console</span>
+python -m http.server -d ../console 8000</pre>
+  </div>
+  <div class="panel">
+    <h3>Known limits</h3>
+    <ul class="limits muted">
+      <li>The holdout was also used for early stopping, so the reported metrics lean optimistic.</li>
+      <li>Probabilities are not calibrated yet. Treat the bands as rankings until they are.</li>
+      <li>This is a portfolio build on public data. It has not been through an independent validation.</li>
+    </ul>
+  </div>
+</section>
+
+<footer><span>Built by Hiral Sarkar · May 2026 · IEEE-CIS Fraud Detection (Vesta, via Kaggle)</span><a href="https://github.com/hiralsarkar/Enterprise-Fraud-Risk-Intelligence-System" target="_blank" rel="noopener">Source on GitHub ↗</a></footer>
+</div>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const sig=x=>1/(1+Math.exp(-x));
+const level=p=>p<.3?'LOW':p<.5?'MEDIUM':p<.75?'HIGH':'CRITICAL';
+const money=n=>'$'+n.toLocaleString('en-US',{minimumFractionDigits:n<100?2:0,maximumFractionDigits:n<100?2:0});
+const ACTION={LOW:'Auto-approve transaction.',MEDIUM:'Route to manual review queue within 4 hours.',HIGH:'Escalate to senior analyst. Consider temporary hold.',CRITICAL:'Immediate block recommended. Notify compliance officer.'};
+
+// Demo scorer: additive log-odds contributions, base rate 3.5%.
+function score(t){
+  const z=Math.max(-1.5,Math.min(5,(t.amt-t.avg)/(t.avg*0.6)));
+  const c=[
+    ['amt_zscore',z.toFixed(1)+'σ',0.38*z],
+    ['is_large_txn',t.amt>500?'1':'0',t.amt>500?0.3:-0.05],
+    ['C5 / C14',String(t.cnt),t.cnt<=2?-0.35:0.13*(t.cnt-2)],
+    ['card1_txn_count',String(t.hist),t.hist<5?0.75:t.hist<30?0.25:t.hist>200?-0.6:-0.2],
+    ['P_email_risky',t.email,{isp:-0.3,free:0.1,anon:0.9,proton:0.7}[t.email]],
+    ['email_mismatch',t.emis?'1':'0',t.emis?0.65:-0.05],
+    ['addr_mismatch',t.addr?'1':'0',t.addr?0.55:-0.05],
+    ['is_night',t.hour<6?'1':'0',t.hour<6?0.45:-0.05],
+    ['is_mobile',t.mob?'1':'0',t.mob?0.15:0]
+  ];
+  const p=sig(-3.3+c.reduce((s,x)=>s+x[2],0));
+  return {p,c:c.filter(x=>Math.abs(x[2])>.04).sort((a,b)=>Math.abs(b[2])-Math.abs(a[2]))};
+}
+
+// ---------- Playground ----------
+const PRE={
+  grocery:{amt:85,avg:90,hist:420,cnt:2,email:'isp',hour:17,emis:0,addr:0,mob:0},
+  testing:{amt:15,avg:120,hist:2,cnt:14,email:'anon',hour:3,emis:1,addr:0,mob:1},
+  takeover:{amt:1240,avg:140,hist:310,cnt:21,email:'proton',hour:2,emis:1,addr:1,mob:1},
+  travel:{amt:1650,avg:520,hist:610,cnt:3,email:'isp',hour:14,emis:0,addr:0,mob:0}
+};
+const hourSel=$('hour');
+for(let h=0;h<24;h++){const o=document.createElement('option');o.value=h;o.textContent=String(h).padStart(2,'0')+':00';hourSel.appendChild(o);}
+function setForm(v){
+  ['amt','avg','hist','cnt','email','hour'].forEach(k=>$(k).value=v[k]);
+  ['emis','addr','mob'].forEach(k=>$(k).checked=!!v[k]);
+}
+function readForm(){
+  return {amt:+$('amt').value,avg:+$('avg').value,hist:+$('hist').value,cnt:+$('cnt').value,email:$('email').value,hour:+$('hour').value,emis:$('emis').checked,addr:$('addr').checked,mob:$('mob').checked};
+}
+const EMAILNAME={isp:'ISP domain',free:'free provider',anon:'anonymous domain',proton:'encrypted provider'};
+function render(){
+  const t=readForm(),r=score(t),lv=level(r.p);
+  $('amtV').textContent=money(t.amt);$('avgV').textContent=money(t.avg);
+  $('histV').textContent=t.hist;$('cntV').textContent=t.cnt;
+  $('score').textContent=(r.p*100).toFixed(1)+'%';$('score').className='score '+lv;
+  $('level').textContent=lv;$('level').className='pill '+lv;
+  $('needle').style.left=(r.p*100)+'%';
+  const max=Math.max(1,...r.c.map(x=>Math.abs(x[2])));
+  $('drivers').innerHTML=r.c.slice(0,6).map(x=>{
+    const w=Math.abs(x[2])/max*100;
+    return '<div class="drv"><span>'+x[0]+'</span><span class="track">'+(x[2]<0?'<span class="neg" style="width:'+w+'%"></span>':'<span class="pos" style="width:'+w+'%"></span>')+'</span><span class="v">'+(x[2]>0?'+':'−')+Math.abs(x[2]).toFixed(2)+'</span></div>';
+  }).join('');
+  const up=r.c.filter(x=>x[2]>0),down=r.c.filter(x=>x[2]<0);
+  let note='Transaction scored at '+(r.p*100).toFixed(1)+'% fraud probability, '+lv+' risk. ';
+  if(up.length) note+='Primary drivers: '+up.slice(0,2).map(x=>x[0]+' ('+(x[0]==='P_email_risky'?EMAILNAME[x[1]]:x[1])+')').join(' and ')+'. ';
+  if(t.amt>t.avg*1.5) note+='Amount of '+money(t.amt)+' is '+(t.amt/t.avg).toFixed(1)+'× this card\'s usual spend. ';
+  if(down.length&&lv!=='CRITICAL') note+='Mitigating: '+down[0][0]+' ('+down[0][1]+'). ';
+  note+='RECOMMENDATION: '+ACTION[lv];
+  $('sar').className='sar '+lv;$('sar').innerHTML='<span></span>';$('sar').firstChild.textContent=note;
+}
+document.querySelectorAll('#try input,#try select').forEach(el=>el.addEventListener('input',()=>{
+  document.querySelectorAll('#presets .chip').forEach(c=>c.setAttribute('aria-pressed','false'));render();}));
+$('presets').addEventListener('click',e=>{
+  const b=e.target.closest('.chip');if(!b)return;
+  document.querySelectorAll('#presets .chip').forEach(c=>c.setAttribute('aria-pressed',c===b?'true':'false'));
+  setForm(PRE[b.dataset.p]);render();
+});
+setForm(PRE.takeover);document.querySelector('[data-p="takeover"]').setAttribute('aria-pressed','true');render();
+
+// ---------- Live feed ----------
+const rnd=(a,b)=>a+Math.random()*(b-a),pick=a=>a[Math.floor(Math.random()*a.length)];
+const CARDS=['visa debit','visa credit','mastercard credit','mastercard debit','discover credit','amex credit'];
+let nextId=3562300,tally={s:0,r:0,b:0,h:0};
+function randomTxn(){
+  const bad=Math.random()<0.16,avg=Math.round(rnd(30,300));
+  return bad
+    ?{amt:Math.round(pick([rnd(5,25),rnd(400,2200)])),avg,hist:Math.round(rnd(0,40)),cnt:Math.round(rnd(5,26)),email:pick(['anon','proton','free']),hour:Math.floor(rnd(0,8)),emis:Math.random()<.7,addr:Math.random()<.5,mob:Math.random()<.7}
+    :{amt:Math.round(avg*rnd(.4,1.7)*100)/100,avg,hist:Math.round(rnd(20,700)),cnt:Math.round(rnd(0,4)),email:pick(['isp','free','free','isp']),hour:Math.floor(rnd(7,23)),emis:Math.random()<.06,addr:Math.random()<.08,mob:Math.random()<.45};
+}
+const rows=$('rows');
+function addRow(animate){
+  const t=randomTxn(),p=score(t).p,lv=level(p),li=document.createElement('li');
+  li.className='row'+(animate?' new':'');
+  li.innerHTML='<span class="id muted">'+(nextId++)+'</span><span class="what"><b>'+money(t.amt)+'</b> · '+pick(CARDS)+'</span><span class="p '+lv+'">'+(p*100).toFixed(1)+'%</span><span class="pill '+lv+'">'+lv+'</span>';
+  rows.prepend(li);while(rows.children.length>8)rows.lastChild.remove();
+  tally.s++;if(lv==='MEDIUM'||lv==='HIGH')tally.r++;if(lv==='CRITICAL'){tally.b++;tally.h+=t.amt;}
+  $('tScored').textContent=tally.s;$('tReview').textContent=tally.r;$('tBlocked').textContent=tally.b;$('tSaved').textContent='$'+Math.round(tally.h).toLocaleString('en-US');
+}
+for(let i=0;i<8;i++)addRow(false);
+let timer=null;const feed=$('feed'),tog=$('feedToggle');
+function run(on){
+  clearInterval(timer);timer=on?setInterval(()=>addRow(true),1300):null;
+  feed.classList.toggle('running',on);tog.textContent=on?'Pause':'Resume';
+}
+tog.addEventListener('click',()=>run(!timer));
+run(!matchMedia('(prefers-reduced-motion: reduce)').matches);
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&timer){run(false);tog.dataset.auto='1';}else if(!document.hidden&&tog.dataset.auto){delete tog.dataset.auto;run(true);}});
+
+// ---------- Results (values from fraud_classifier/outputs) ----------
+const M=[['KS statistic',.5554,.6663,.40,'benchmark > 0.40'],['Gini',.6738,.8218,.60,'benchmark > 0.60'],['AUC-ROC',.8369,.9109,null,''],['AUC-PR',.3625,.5164,null,'']];
+$('metrics').innerHTML=M.map(m=>'<div class="metric"><div class="top"><span>'+m[0]+' <span class="note">'+m[4]+'</span></span><span class="num"><span class="muted">'+m[1].toFixed(3)+'</span> → <b>'+m[2].toFixed(3)+'</b></span></div><div class="pair"><div class="bar"><span class="ch" style="width:'+m[1]*100+'%"></span>'+(m[3]?'<i class="bm" style="left:'+m[3]*100+'%"></i>':'')+'</div><div class="bar"><span class="xg" style="width:'+m[2]*100+'%"></span>'+(m[3]?'<i class="bm" style="left:'+m[3]*100+'%"></i>':'')+'</div></div></div>').join('');
+const S=[['C5',.2896],['C14',.2478],['C1',.2329],['M4',.2186],['TransactionAmt',.2109],['C13',.1993],['card6',.1790],['D3',.1762],['card1_txn_count',.1694],['D2',.1554]];
+$('shap').innerHTML=S.map(s=>'<span>'+s[0]+'</span><span><span class="b" style="display:block;width:'+s[1]/.2896*100+'%"></span></span><span class="v">'+s[1].toFixed(3)+'</span>').join('');
+
+// ---------- Copy ----------
+$('copy').addEventListener('click',()=>{
+  const el=$('cmd'),done=()=>{$('copy').textContent='Copied';setTimeout(()=>$('copy').textContent='Copy',1500);};
+  const fallback=()=>{const r=document.createRange();r.selectNodeContents(el);const s=getSelection();s.removeAllRanges();s.addRange(r);$('copy').textContent='Selected';};
+  try{navigator.clipboard.writeText(el.textContent).then(done,fallback);}catch(e){fallback();}
+});
+})();
+</script>
+</body>
+</html>
